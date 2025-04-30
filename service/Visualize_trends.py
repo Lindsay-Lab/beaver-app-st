@@ -678,38 +678,62 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
 ##### Compute LST
 def compute_lst(s2_image, landsat_col, boxArea):
     """Computes LST from the median of the filtered Landsat collection."""
-    median_img = landsat_col.median().clip(boxArea)
+    try:
+        # Get median image with error handling
+        median_img = ee.Algorithms.If(
+            landsat_col.size().gt(0),
+            landsat_col.median().clip(boxArea),
+            ee.Image.constant(0).rename('SR_B4').addBands(ee.Image.constant(0).rename('SR_B5')).addBands(ee.Image.constant(0).rename('ST_B10'))
+        )
+        median_img = ee.Image(median_img)
 
-    # Compute NDVI again, just to get min/max
-    ndvi = median_img.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
+        # Compute NDVI with error handling
+        ndvi = median_img.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
 
-    # Compute NDVI min/max
-    ndvi_dict = ndvi.reduceRegion(
-        reducer=ee.Reducer.minMax(), 
-        geometry=boxArea, 
-        scale=30, 
-        maxPixels=1e13
-    )
+        # Compute NDVI min/max with error handling
+        ndvi_dict = ndvi.reduceRegion(
+            reducer=ee.Reducer.minMax(), 
+            geometry=boxArea, 
+            scale=30, 
+            maxPixels=1e13
+        )
 
-    ndvi_min = ee.Number(ee.Algorithms.If(ndvi_dict.contains('NDVI_min'), ndvi_dict.get('NDVI_min'), 0))
-    ndvi_max = ee.Number(ee.Algorithms.If(ndvi_dict.contains('NDVI_max'), ndvi_dict.get('NDVI_max'), 0))
+        # Get NDVI min/max with fallback values
+        ndvi_min = ee.Number(ee.Algorithms.If(
+            ndvi_dict.contains('NDVI_min'),
+            ndvi_dict.get('NDVI_min'),
+            0
+        ))
+        ndvi_max = ee.Number(ee.Algorithms.If(
+            ndvi_dict.contains('NDVI_max'),
+            ndvi_dict.get('NDVI_max'),
+            1
+        ))
 
-    # Compute Fraction of Vegetation (FV)
-    fv = ndvi.subtract(ndvi_min).divide(ndvi_max.subtract(ndvi_min).max(1e-6)).pow(2).rename('FV')
+        # Compute Fraction of Vegetation (FV) with error handling
+        fv = ndvi.subtract(ndvi_min).divide(ndvi_max.subtract(ndvi_min).max(1e-6)).pow(2).rename('FV')
 
-    # Compute Emissivity (EM)
-    em = fv.multiply(0.004).add(0.986).rename('EM')
+        # Compute Emissivity (EM) with error handling
+        em = fv.multiply(0.004).add(0.986).rename('EM')
 
-    # Select the thermal band
-    thermal = median_img.select('ST_B10').rename('thermal')
+        # Select the thermal band with error handling
+        thermal = ee.Algorithms.If(
+            median_img.bandNames().contains('ST_B10'),
+            median_img.select('ST_B10'),
+            ee.Image.constant(0)
+        )
+        thermal = ee.Image(thermal).rename('thermal')
 
-    # Compute LST in °C
-    lst = thermal.expression(
-        '(TB / (1 + (0.00115 * (TB / 1.438)) * log(em))) - 273.15',
-        {'TB': thermal, 'em': em}
-    ).rename('LST')
+        # Compute LST in °C with error handling
+        lst = thermal.expression(
+            '(TB / (1 + (0.00115 * (TB / 1.438)) * log(em))) - 273.15',
+            {'TB': thermal, 'em': em}
+        ).rename('LST')
 
-    return lst
+        return lst
+    except Exception as e:
+        # Return a default LST image if any error occurs
+        return ee.Image.constant(0).rename('LST').clip(boxArea)
 
 
 ############# Functions to add additional datasets- Landsat LST, OPEN-ET ET
@@ -786,87 +810,202 @@ def add_landsat_lst(s2_image):
 ###### LST AND ET
 def add_landsat_lst_et(s2_image):
     """Adds Landsat LST and OpenET data to a Sentinel-2 image."""
+    # Extract image identifiers for debugging
+    dam_id = ee.String(ee.Algorithms.If(
+        s2_image.get('id_property'),
+        s2_image.get('id_property'),
+        'unknown_id'
+    ))
     
+    # Initial values: year and month for each image
     year = ee.Number(s2_image.get('Image_year'))
     month = ee.Number(s2_image.get('Image_month'))
+    
+    # Safety check - use default values if year or month is null
+    year = ee.Algorithms.If(ee.Algorithms.IsEqual(year, None), 2020, year)
+    month = ee.Algorithms.If(ee.Algorithms.IsEqual(month, None), 1, month)
+    
+    # Create date range
     start_date = ee.Date.fromYMD(year, month, 1)
     end_date = start_date.advance(1, 'month')
 
-    # Ensure boxArea is valid; if None, use the image bounds
+    # Ensure boxArea is valid
     boxArea = ee.Algorithms.If(
         s2_image.get('Area'),
         s2_image.get('Area'),
-        s2_image.geometry()  # Use image geometry as fallback
+        s2_image.geometry()
     )
+    boxArea = ee.Geometry(boxArea)
 
-    ## **STEP 1: PROCESS LANDSAT DATA FOR LST**
-    def apply_scale_factors(image):
-        opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2)
-        thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0)
-        return image.addBands(opticalBands, overwrite=True).addBands(thermalBands, overwrite=True)
+    # Create default empty images
+    empty_lst = ee.Image.constant(0).rename('LST').clip(boxArea)
+    empty_et = ee.Image.constant(0).rename('ET').clip(boxArea)
 
-    def cloud_mask(image):
-        cloudShadowBitmask = (1 << 3)
-        cloudBitmask = (1 << 5)
-        qa = image.select('QA_PIXEL')
-        mask = qa.bitwiseAnd(cloudShadowBitmask).eq(0).And(
-               qa.bitwiseAnd(cloudBitmask).eq(0))
-        return image.updateMask(mask)
+    # Set initial result images
+    lst_image = empty_lst
+    et_final = empty_et
+    
+    # Variables to track processing status
+    lst_status = 'default'
+    et_status = 'default'
+    lst_debug = {}
+    et_debug = {}
 
-    # Build the Landsat collection
-    landsat_col = (ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
-                   .filterDate(start_date, end_date)
-                   .filterBounds(boxArea)
-                   .map(apply_scale_factors)
-                   .map(cloud_mask))
+    #1. Process LST data
+    try:
+        # Build Landsat collection
+        landsat_col = (ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+                     .filterDate(start_date, end_date)
+                     .filterBounds(boxArea))
+        
+        landsat_size = landsat_col.size()
+        lst_debug = {'initial_size': landsat_size}
+        
+        # Process collection if not empty
+        def processLandsat(collection):
+            # Apply scaling factors
+            def apply_scale_factors(image):
+                opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2)
+                thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0)
+                return image.addBands(opticalBands, overwrite=True).addBands(thermalBands, overwrite=True)
 
-    def add_ndvi_stats(img):
-        # Compute NDVI
-        ndvi = img.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
+            # Cloud masking function
+            def cloud_mask(image):
+                cloudShadowBitmask = (1 << 3)
+                cloudBitmask = (1 << 5)
+                qa = image.select('QA_PIXEL')
+                mask = qa.bitwiseAnd(cloudShadowBitmask).eq(0).And(
+                    qa.bitwiseAnd(cloudBitmask).eq(0))
+                return image.updateMask(mask)
 
-        # NDVI min/max
-        ndvi_dict = ndvi.reduceRegion(
+            # Apply processing
+            processed = collection.map(apply_scale_factors).map(cloud_mask)
+            
+            # Add NDVI statistics
+            def add_ndvi_stats(img):
+                ndvi = img.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
+                ndvi_dict = ndvi.reduceRegion(
+                    reducer=ee.Reducer.minMax(),
+                    geometry=boxArea,
+                    scale=30,
+                    maxPixels=1e13
+                )
+                return img.setMulti(ndvi_dict)
+
+            processed = processed.map(add_ndvi_stats)
+            filtered = processed.filter(ee.Filter.neq('NDVI_min', None))
+            
+            return filtered
+        
+        filtered_col = ee.Algorithms.If(
+            landsat_size.gt(0),
+            processLandsat(landsat_col),
+            ee.ImageCollection([])
+        )
+        filtered_col = ee.ImageCollection(filtered_col)
+        filtered_size = filtered_col.size()
+        
+        # Add to debug info
+        lst_debug = ee.Dictionary(lst_debug).set('filtered_size', filtered_size)
+        
+        # Compute LST if filtered collection is not empty
+        lst_result = ee.Algorithms.If(
+            filtered_size.gt(0),
+            compute_lst(s2_image, filtered_col, boxArea),
+            empty_lst
+        )
+        
+        lst_image = ee.Image(lst_result)
+        
+        # Check if the LST image has non-zero values
+        lst_stats = lst_image.reduceRegion(
             reducer=ee.Reducer.minMax(),
             geometry=boxArea,
             scale=30,
             maxPixels=1e13
         )
+        
+        lst_debug = ee.Dictionary(lst_debug).set('lst_stats', lst_stats)
+        
+        lst_status = ee.Algorithms.If(
+            filtered_size.gt(0),
+            'computed',
+            ee.Algorithms.If(
+                landsat_size.gt(0),
+                'filtered_empty',
+                'collection_empty'
+            )
+        )
+        
+    except Exception as e:
+        lst_status = 'error: ' + str(e)
+        lst_image = empty_lst
 
-        return img.setMulti(ndvi_dict)
+    #2. Process ET data - completely independent from LST processing
+    try:
+        # Try to get OpenET data
+        et_collection = (
+            ee.ImageCollection("OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0")
+            .filterDate(start_date, end_date)
+            .filterBounds(boxArea)
+        )
+        
+        et_size = et_collection.size()
+        et_debug = {'collection_size': et_size}
+        
+        # Get the area's centroid for a point check
+        area_centroid = boxArea.centroid()
+        et_debug = ee.Dictionary(et_debug).set('centroid', area_centroid.coordinates())
+        
+        # Check if this area is within CONUS (Continental US) where OpenET is available
+        us_bounds = ee.Geometry.Rectangle([-125, 24, -66, 50]) # Rough US bounds
+        is_in_us = us_bounds.contains(area_centroid)
+        et_debug = ee.Dictionary(et_debug).set('in_us', is_in_us)
+        
+        # Process ET data if collection is not empty
+        et_result = ee.Algorithms.If(
+            et_size.gt(0),
+            et_collection.first().select("et_ensemble_mad").rename("ET").clip(boxArea),
+            empty_et
+        )
+        
+        et_final = ee.Image(et_result)
+        
+        # Check if the ET image has non-zero values
+        et_stats = et_final.reduceRegion(
+            reducer=ee.Reducer.minMax(),
+            geometry=boxArea,
+            scale=30,
+            maxPixels=1e13
+        )
+        
+        et_debug = ee.Dictionary(et_debug).set('et_stats', et_stats)
+        
+        et_status = ee.Algorithms.If(
+            et_size.gt(0),
+            ee.String('computed_from_').cat(ee.String(et_size)).cat('_images'),
+            'collection_empty'
+        )
+        
+    except Exception as e:
+        et_status = 'error: ' + str(e)
+        et_final = empty_et
 
-    landsat_col = landsat_col.map(add_ndvi_stats)
-    filtered_col = landsat_col.filter(ee.Filter.neq('NDVI_min', None))
-    collection_size = filtered_col.size()
-
-    empty_image = ee.Image.constant(0).rename(['LST']).clip(boxArea)
-
-    lst_image = ee.Algorithms.If(
-        collection_size.eq(0),
-        empty_image,  
-        compute_lst(s2_image, filtered_col, boxArea)  
-    )
-    lst_image = ee.Image(lst_image)
-
-    ## **STEP 2: PROCESS ET DATA FROM OPENET**
-    et_collection = (
-        ee.ImageCollection("OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0")
-        .filterDate(start_date, end_date)
-        .filterBounds(boxArea)
-    )
-
-    # Compute the monthly ET mean for the given area
-    et_monthly = et_collection.mean().select("et_ensemble_mad").rename("ET")
-
-    # If ET data is missing, return an empty ET band
-    et_final = ee.Algorithms.If(
-        et_collection.size().eq(0),
-        ee.Image.constant(0).rename("ET").clip(boxArea),  # Empty ET image
-        et_monthly.clip(boxArea)
-    )
-    et_final = ee.Image(et_final)
-
-    ## **STEP 3: ADD LST & ET TO THE SENTINEL-2 IMAGE**
-    return s2_image.addBands(lst_image).addBands(et_final).set("size", collection_size)
+    # Add processing status information
+    result = s2_image.addBands(lst_image)
+    result = result.addBands(et_final)
+    
+    # Add debug information as image properties
+    result = result.set('lst_status', lst_status)
+    result = result.set('et_status', et_status)
+    result = result.set('year', year)
+    result = result.set('month', month)
+    result = result.set('dam_id', dam_id)
+    result = result.set('lst_debug', lst_debug)
+    result = result.set('et_debug', et_debug)
+    result = result.set('date_range', ee.String(start_date.format()).cat(' to ').cat(end_date.format()))
+    
+    return result
 
 ########### Functions to calculate means
 ##### NDVI, LST
@@ -932,9 +1071,22 @@ def compute_all_metrics_LST_ET(image):
     Returns an ee.Feature containing mean NDVI, NDWI_Green, LST, and ET 
     for the geometry of interest.
     """
+    # Extract key identifiers
+    dam_id = image.get('dam_id')
+    lst_status = image.get('lst_status')
+    et_status = image.get('et_status')
+    lst_debug = image.get('lst_debug')
+    et_debug = image.get('et_debug')
+    date_range = image.get('date_range')
+    
     # 1) Use the 'elevation' band (or any other reference band) to get geometry
     elevation_mask = image.select('elevation')
     geometry = elevation_mask.geometry()
+    
+    # Check if needed bands exist
+    bands = image.bandNames()
+    has_lst = bands.contains('LST')
+    has_et = bands.contains('ET')
 
     # 2) Compute NDVI using Sentinel-2 Red & NIR
     ndvi = image.normalizedDifference(['S2_NIR', 'S2_Red']).rename('NDVI')
@@ -944,6 +1096,7 @@ def compute_all_metrics_LST_ET(image):
         scale=30,
         maxPixels=1e13
     ).get('NDVI')
+    ndvi_mean = ee.Algorithms.If(ee.Algorithms.IsEqual(ndvi_mean, None), 0, ndvi_mean)
 
     # 3) Compute NDWI_Green using Sentinel-2 Green & NIR
     ndwi_green = image.normalizedDifference(['S2_Green', 'S2_NIR']).rename('NDWI_Green')
@@ -953,6 +1106,7 @@ def compute_all_metrics_LST_ET(image):
         scale=30,
         maxPixels=1e13
     ).get('NDWI_Green')
+    ndwi_green_mean = ee.Algorithms.If(ee.Algorithms.IsEqual(ndwi_green_mean, None), 0, ndwi_green_mean)
 
     # 4) Select LST band (added by add_landsat_lst_et)
     lst_band = image.select('LST')
@@ -962,6 +1116,15 @@ def compute_all_metrics_LST_ET(image):
         scale=30,
         maxPixels=1e13
     ).get('LST')
+    lst_mean = ee.Algorithms.If(ee.Algorithms.IsEqual(lst_mean, None), 0, lst_mean)
+    
+    # Get LST stats for debugging
+    lst_stats = lst_band.reduceRegion(
+        reducer=ee.Reducer.minMax(),
+        geometry=geometry,
+        scale=30,
+        maxPixels=1e13
+    )
 
     # 5) Select ET band (added by add_landsat_lst_et)
     et_band = image.select('ET')
@@ -971,23 +1134,43 @@ def compute_all_metrics_LST_ET(image):
         scale=30,
         maxPixels=1e13
     ).get('ET')
+    et_mean = ee.Algorithms.If(ee.Algorithms.IsEqual(et_mean, None), 0, et_mean)
+    
+    # Get ET stats for debugging
+    et_stats = et_band.reduceRegion(
+        reducer=ee.Reducer.minMax(),
+        geometry=geometry,
+        scale=30,
+        maxPixels=1e13
+    )
 
     # 6) Extract metadata (month, year, dam status, etc.)
     month = image.get('Image_month')
     status = image.get('Dam_status')
     year = image.get('Image_year')
-    id_property = image.get('id_property')  # Add id_property
+    id_property = image.get('id_property')
 
     # Combine all metrics & metadata into a dictionary
     combined_metrics = ee.Dictionary({
         'NDVI': ndvi_mean,
         'NDWI_Green': ndwi_green_mean,
         'LST': lst_mean,
-        'ET': et_mean,  # 🚀 New: Adding ET to the feature
+        'ET': et_mean,
         'Image_month': month,
         'Image_year': year,
         'Dam_status': status,
-        'id_property': id_property  # Add id_property to the dictionary
+        'id_property': id_property,
+        
+        # Debug information
+        'has_lst_band': has_lst,
+        'has_et_band': has_et,
+        'lst_status': lst_status,
+        'et_status': et_status,
+        'lst_stats': lst_stats,
+        'et_stats': et_stats,
+        'date_range': date_range,
+        'lst_debug': lst_debug,
+        'et_debug': et_debug
     })
 
     # Return as an ee.Feature
