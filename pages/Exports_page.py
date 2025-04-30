@@ -12,7 +12,7 @@ from sklearn.metrics import roc_curve, auc, accuracy_score
 from service.Sentinel2_functions import process_Sentinel2_with_cloud_coverage
 from service.Export_dam_imagery import  S2_PixelExtraction_Export,Sentinel_Only_Export
 from service.Negative_sample_functions import deduplicate_locations, prepareHydro,sampleNegativePoints
-from service.Parser import upload_points_to_ee, set_id_year_property, upload_non_dam_points_to_ee
+from service.Parser import upload_points_to_ee, set_id_year_property
 from service.Visualize_trends import S2_Export_for_visual, compute_all_metrics,compute_lst,add_landsat_lst, add_landsat_lst_et,compute_all_metrics_up_downstream, S2_Export_for_visual_flowdir, compute_all_metrics_LST_ET
 from service.Data_management import set_id_negatives, add_dam_buffer_and_standardize_date
 import ee 
@@ -213,7 +213,7 @@ if st.session_state.questionnaire_shown:
                                                 
                         # Provide additional options
                         st.subheader("To use a different waterway map instead:")
-                        upload_own_checkbox = st.checkbox("Use Custom Waterway Map")
+                        upload_own_checkbox = st.checkbox("Use Custom WaterwayMap")
                         choose_other_checkbox = st.checkbox("Use Alternative Waterway Map")
 
                         if upload_own_checkbox:
@@ -390,11 +390,9 @@ if st.session_state.questionnaire_shown:
                 if uploaded_negatives:
                     with st.spinner("Processing uploaded non-dam data..."):
                         try:
-                            # Changed from upload_points_to_ee to upload_non_dam_points_to_ee
-                            # This will use the date from dam data and not ask user to select a year
-                            negative_feature_collection = upload_non_dam_points_to_ee(uploaded_negatives, widget_prefix="NonDam")
+                            negative_feature_collection = upload_points_to_ee(uploaded_negatives, widget_prefix="NonDam")
                             if negative_feature_collection:
-                                # Process negative samples
+                                # 处理负样本数据
                                 fc = negative_feature_collection
                                 features_list = fc.toList(fc.size())
                                 indices = ee.List.sequence(0, fc.size().subtract(1))
@@ -402,10 +400,10 @@ if st.session_state.questionnaire_shown:
                                 def set_id_negatives2(idx):
                                     idx = ee.Number(idx)
                                     feature = ee.Feature(features_list.get(idx))
-                                    # Ensure each negative sample has a date property
+                                    # 确保每个负样本都有日期属性
                                     date = feature.get('date')
                                     if not date:
-                                        # Get date from the first positive sample
+                                        # 从正样本获取日期
                                         first_pos = st.session_state.Positive_collection.first()
                                         date = first_pos.get('date')
                                     return feature.set(
@@ -414,7 +412,7 @@ if st.session_state.questionnaire_shown:
                                 
                                 Neg_points_id = ee.FeatureCollection(indices.map(set_id_negatives2))
                                 
-                                # Process positive samples
+                                # 处理正样本数据
                                 if not st.session_state.use_all_dams:
                                     Pos_collection = st.session_state.Dam_data
                                 else:
@@ -428,10 +426,10 @@ if st.session_state.questionnaire_shown:
                                 def set_id_positives(idx):
                                     idx = ee.Number(idx)
                                     feature = ee.Feature(pos_features_list.get(idx))
-                                    # Ensure each positive sample has a date property
+                                    # 确保每个正样本都有日期属性
                                     date = feature.get('date')
                                     if not date:
-                                        # Get date from the first positive sample
+                                        # 从第一个正样本获取日期
                                         first_pos = st.session_state.Positive_collection.first()
                                         date = first_pos.get('date')
                                     return feature.set(
@@ -440,28 +438,28 @@ if st.session_state.questionnaire_shown:
 
                                 Positive_dam_id = ee.FeatureCollection(pos_indices.map(set_id_positives))
                                 
-                                # Create merged collection
+                                # 创建合并集合
                                 Merged_collection = Positive_dam_id.merge(Neg_points_id)
                                 st.session_state.Merged_collection = Merged_collection
                                 
-                                # Set state variables
+                                # 设置状态变量
                                 st.session_state.Negative_upload_collection = negative_feature_collection
                                 st.session_state['Full_negative'] = st.session_state.Negative_upload_collection
                                 st.session_state.buffer_complete = True
                                 st.session_state.step4_complete = True
-                                st.success("✅ Non-dam locations uploaded successfully!")
+                                st.success("✅ 非水坝位置上传成功！")
                                 
-                                # Display data preview
-                                st.subheader("Data Preview")
+                                # 显示数据预览
+                                st.subheader("数据预览")
                                 preview_map = geemap.Map()
                                 preview_map.add_basemap("SATELLITE")
-                                preview_map.addLayer(Neg_points_id, {'color': 'red'}, 'Non-dam locations')
-                                preview_map.addLayer(Positive_dam_id, {'color': 'blue'}, 'Dam locations')
+                                preview_map.addLayer(Neg_points_id, {'color': 'red'}, '非水坝位置')
+                                preview_map.addLayer(Positive_dam_id, {'color': 'blue'}, '水坝位置')
                                 preview_map.centerObject(Merged_collection)
                                 preview_map.to_streamlit(width=800, height=600)
                         except Exception as e:
-                            st.error(f"Error processing file: {str(e)}")
-                            st.error(traceback.format_exc())  # Show detailed error information
+                            st.error(f"处理文件时出错: {str(e)}")
+                            st.error(traceback.format_exc())  # 显示详细错误信息
 
             if generate_negatives_checkbox:
                 st.subheader("Specify the parameters for negative point generation:")
@@ -720,7 +718,7 @@ if st.session_state.questionnaire_shown:
                                         standardized_date = ee.Date(date)
                                         return feature
                                     except Exception as e:
-                                        st.error(f"Date validation error: {str(e)}")
+                                        st.error(f"日期验证错误: {str(e)}")
                                         return None
 
                                 Dam_data = Dam_data.map(validate_date).filter(ee.Filter.notNull(['Survey_Date']))
@@ -777,11 +775,11 @@ if st.session_state.questionnaire_shown:
                         buf = io.BytesIO()
                         st.session_state.fig.savefig(buf, format="png")
                         buf.seek(0)
-                        st.download_button("Download Combined Figures", buf, "combined_trends.png", "image/png")
+                        st.download_button("Download Initial Figures", buf, "initial_trends.png", "image/png")
 
                     with col2:
                         csv = st.session_state.df_lst.to_csv(index=False).encode('utf-8')
-                        st.download_button("Download Combined Data (CSV)", csv, "combined_data.csv", "text/csv")
+                        st.download_button("Download Initial Data (CSV)", csv, "initial_data.csv", "text/csv")
 
             with tab2:
                 if not "upstream_analysis_complete" in st.session_state:
