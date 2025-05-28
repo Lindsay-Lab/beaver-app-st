@@ -35,6 +35,63 @@ from service.Validation_service import (
 import json
 from google.oauth2 import service_account
 
+def extract_coordinates_df(dam_data):
+    """
+    Extract coordinates from Dam_data and create a DataFrame with id_property and coordinates
+    
+    Args:
+        dam_data: Earth Engine Feature Collection containing dam data
+        
+    Returns:
+        DataFrame with id_property, longitude, and latitude columns
+    """
+    try:
+        # Get features from Dam_data
+        dam_features = dam_data.getInfo()['features']
+        
+        coords_data = []
+        for i, feature in enumerate(dam_features):
+            try:
+                props = feature['properties']
+                id_prop = props.get('id_property')
+                
+                if not id_prop:
+                    st.warning(f"Feature {i} missing id_property")
+                    continue
+                
+                
+                # Extract coordinates from Point_geo
+                if 'Point_geo' in props:
+                    point_geo = props['Point_geo']
+                    
+                    if isinstance(point_geo, dict) and 'coordinates' in point_geo:
+                        coords = point_geo['coordinates']
+                        if isinstance(coords, list) and len(coords) >= 2:
+                            coords_data.append({
+                                'id_property': id_prop,
+                                'longitude': coords[0],
+                                'latitude': coords[1]
+                            })
+                        else:
+                            st.warning(f"Invalid coordinates format for feature {i}: {coords}")
+                    else:
+                        st.warning(f"Point_geo missing coordinates for feature {i}")
+                else:
+                    st.warning(f"No Point_geo found for feature {i}")
+                    
+            except Exception as e:
+                st.warning(f"Error processing feature {i}: {str(e)}")
+                continue
+                
+        # Create DataFrame from coordinates data
+        coords_df = pd.DataFrame(coords_data)
+        
+            
+        return coords_df
+    except Exception as e:
+        st.warning(f"Could not extract coordinates: {str(e)}")
+        return pd.DataFrame(columns=['id_property', 'longitude', 'latitude'])
+
 credentials_info = {
     "type": st.secrets["gcp_service_account"]["type"],
     "project_id": st.secrets["gcp_service_account"]["project_id"],
@@ -100,30 +157,24 @@ if "fig" not in st.session_state:
 for i in range(1, 7):
     if f"step{i}_complete" not in st.session_state:
         st.session_state[f"step{i}_complete"] = False
-
-# Show questionnaire toast if not shown before
-if not st.session_state.questionnaire_shown:
-    st.toast(
-        "Please help us improve by completing our survey!",
-        icon="📝"
-    )
-    
+        
+if not st.session_state.questionnaire_shown:    
     st.title("Beaver Impacts Feedback Survey")
     st.markdown("""
     Thank you for being a beta tester for the Beaver Impacts web tool! We really value your input and appreciate you taking the time to fill out this form.
     
-    Please click [here](https://docs.google.com/forms/d/e/1FAIpQLSeE1GP7OptA4-z8Melz2AHxNsddtL9ZgJVXdVVtxLsrljJ10Q/viewform?usp=sharing) to start the survey.
+    Please click [here](https://docs.google.com/forms/d/e/1FAIpQLSeE1GP7OptA4-z8Melz2AHxNsddtL9ZgJVXdVVtxLsrljJ10Q/viewform?usp=sharing) to start the survey. Continue on by clicking below: 
     """)
     
-    if st.button("I have opened the survey and will fill it out after trying the webtool.", type="primary"):
+    if st.button("I have opened the survey and will fill it out after trying the web tool.", type="primary"):
         st.session_state.questionnaire_shown = True
         st.rerun()
 
 # Continue with the rest of the application if questionnaire is shown
 if st.session_state.questionnaire_shown:
     st.title("Analyzing the Impact of Beaver Dams")
-    st.warning("Please note that the Evapotranspiration data is not available for beaver dam locations in the east half of the US. See which states are not available on OpenET website: [Link](https://explore.etdata.org/#5/39.665/-110.396).")
-    
+    st.warning("Please note that the Evapotranspiration data is not available for the eastern half of the US or for certain years. Learn more on the OpenET website: [Link](https://etdata.org/).")
+
     # Create expandable sections for each step
     with st.expander("Step 1: Upload Dam Locations", expanded=not st.session_state.step1_complete):
         st.header("Step 1: Upload Dam Locations")
@@ -358,7 +409,6 @@ if st.session_state.questionnaire_shown:
                             else:
                                 st.warning("No valid dams found. Please adjust the validation criteria.")
                 else:
-                    st.success("All dam locations are valid!")
                     st.session_state.validation_complete = True
                     st.session_state.use_all_dams = True
                     st.session_state.Dam_data = st.session_state['Full_positive']
@@ -392,7 +442,7 @@ if st.session_state.questionnaire_shown:
                         try:
                             negative_feature_collection = upload_points_to_ee(uploaded_negatives, widget_prefix="NonDam")
                             if negative_feature_collection:
-                                # 处理负样本数据
+                                # Process negative sample data
                                 fc = negative_feature_collection
                                 features_list = fc.toList(fc.size())
                                 indices = ee.List.sequence(0, fc.size().subtract(1))
@@ -727,19 +777,46 @@ if st.session_state.questionnaire_shown:
                                     st.error("No valid data with dates found. Please check your data.")
                                     st.stop()
 
-                                S2_cloud_mask_export = ee.ImageCollection(S2_Export_for_visual(Dam_data))
-                                S2_ImageCollection = ee.ImageCollection(S2_cloud_mask_export)
-
-                                S2_with_LST = S2_ImageCollection.map(add_landsat_lst_et)
-                                results_fc_lst = S2_with_LST.map(compute_all_metrics_LST_ET)
-                                results_fcc_lst = ee.FeatureCollection(results_fc_lst)
-
-                                try:
-                                    df_lst = geemap.ee_to_df(results_fcc_lst)
-                                except Exception as e:
-                                    st.error(f"Error converting to DataFrame: {e}")
-                                    st.error("This might be due to missing or invalid dates in your data.")
-                                    st.error("Please check that all your data points have valid dates.")
+                                # Get total number of dam points
+                                total_count = Dam_data.size().getInfo()
+                                batch_size = 30  # Increased batch size for efficiency
+                                num_batches = (total_count + batch_size - 1) // batch_size
+                                df_list = []
+                                
+                                progress_bar = st.progress(0)
+                                st.write(f"Processing {total_count} dam points in {num_batches} batches")
+                                
+                                # Process each batch separately
+                                for i in range(num_batches):
+                                    try:
+                                        st.write(f"Processing batch {i+1} of {num_batches}")
+                                        
+                                        # Get current batch of dam points
+                                        dam_batch = Dam_data.toList(batch_size, i * batch_size)
+                                        dam_batch_fc = ee.FeatureCollection(dam_batch)
+                                        
+                                        # Process this batch through the entire pipeline
+                                        S2_cloud_mask_batch = ee.ImageCollection(S2_Export_for_visual(dam_batch_fc))
+                                        S2_ImageCollection_batch = ee.ImageCollection(S2_cloud_mask_batch)
+                                        S2_with_LST_batch = S2_ImageCollection_batch.map(add_landsat_lst_et)
+                                        results_fc_lst_batch = S2_with_LST_batch.map(compute_all_metrics_LST_ET)
+                                        results_fcc_lst_batch = ee.FeatureCollection(results_fc_lst_batch)
+                                        
+                                        # Convert directly to DataFrame
+                                        df_batch = geemap.ee_to_df(results_fcc_lst_batch)
+                                        df_list.append(df_batch)
+                                        
+                                        progress_bar.progress((i + 1) / num_batches)
+                                    except Exception as e:
+                                        st.warning(f"Error processing batch {i+1}: {e}")
+                                        # Continue with the next batch instead of stopping
+                                        continue
+                                
+                                # Combine all batch results
+                                if len(df_list) > 0:
+                                    df_lst = pd.concat(df_list, ignore_index=True)
+                                else:
+                                    st.error(f"Error Message: {e}")
                                     st.stop()
 
                                 df_lst['Image_month'] = pd.to_numeric(df_lst['Image_month'])
@@ -778,9 +855,58 @@ if st.session_state.questionnaire_shown:
                         st.download_button("Download Initial Figures", buf, "initial_trends.png", "image/png")
 
                     with col2:
-                        csv = st.session_state.df_lst.to_csv(index=False).encode('utf-8')
-                        st.download_button("Download Initial Data (CSV)", csv, "initial_data.csv", "text/csv")
-
+                        # Create export DataFrame with coordinates
+                        if st.session_state.df_lst is not None and 'Dam_data' in st.session_state:
+                            export_df = st.session_state.df_lst.copy()
+                            
+                            
+                            # Extract coordinates and merge with main data
+                            coords_df = extract_coordinates_df(st.session_state.Dam_data)
+                            
+                            if not coords_df.empty:
+                                
+                                if 'id_property' in export_df.columns:
+                                    # Check for matching id_property values
+                                    export_ids = set(export_df['id_property'].unique())
+                                    coord_ids = set(coords_df['id_property'].unique())
+                                
+                                    
+                                    # Find missing IDs
+                                    missing_in_coords = export_ids - coord_ids
+                                    if missing_in_coords:
+                                        st.warning(f"Missing coordinates for IDs: {list(missing_in_coords)[:5]}...")
+                                    
+                                    # Merge using id_property
+                                    export_df = export_df.merge(coords_df, on='id_property', how='left')
+                                
+                                    
+                                    # Check for NaN values
+                                    nan_coords = export_df[export_df['longitude'].isna()].shape[0]
+                                    if nan_coords > 0:
+                                        st.warning(f"{nan_coords} rows could not be matched with coordinates")
+                                        st.write("Sample of rows with missing coordinates:")
+                                        st.write(export_df[export_df['longitude'].isna()].head())
+                                    
+                                    # Fill NaN values with 0
+                                    export_df['longitude'] = export_df['longitude'].fillna(0)
+                                    export_df['latitude'] = export_df['latitude'].fillna(0)
+                                    
+                                else:
+                                    st.error("Export DataFrame missing 'id_property' column")
+                                    st.write("Export DataFrame columns:", export_df.columns)
+                            else:
+                                st.warning("No coordinates were extracted from the features")
+                                # Add placeholder columns
+                                export_df['longitude'] = 0
+                                export_df['latitude'] = 0
+                        else:
+                            st.error("Export DataFrame or Dam_data not found in session state")
+                            export_df = st.session_state.df_lst.copy()
+                            export_df['longitude'] = 0
+                            export_df['latitude'] = 0
+                            
+                        csv = export_df.to_csv(index=False).encode('utf-8')
+                        st.download_button("Download Combined Data (CSV)", csv, "combined_data.csv", "text/csv")
             with tab2:
                 if not "upstream_analysis_complete" in st.session_state:
                     st.session_state.upstream_analysis_complete = False
@@ -797,31 +923,42 @@ if st.session_state.questionnaire_shown:
                                     
                                     # Batch processing
                                     total_count = Dam_data.size().getInfo()
-                                    batch_size = 10
+                                    batch_size = 30  # Increased batch size for efficiency
                                     num_batches = (total_count + batch_size - 1) // batch_size
-                                    dam_list = Dam_data.toList(total_count)
                                     df_list = []
 
                                     progress_bar = st.progress(0)
+                                    st.write(f"Processing {total_count} dam points in {num_batches} batches")
+                                    
                                     for i in range(num_batches):
-                                        batch = dam_list.slice(i * batch_size, min(total_count, (i + 1) * batch_size))
-                                        dam_batch = ee.FeatureCollection(batch)
+                                        try:
+                                            st.write(f"Processing batch {i+1} of {num_batches}")
+                                            
+                                            # Get current batch of dam points
+                                            dam_batch = Dam_data.toList(batch_size, i * batch_size)
+                                            dam_batch_fc = ee.FeatureCollection(dam_batch)
 
-                                        # Process the images with flow direction
-                                        S2_IC_batch = S2_Export_for_visual_flowdir(dam_batch, waterway_fc)
-                                        
-                                        # Add LST and ET data
-                                        S2_with_LST_ET = S2_IC_batch.map(add_landsat_lst_et)
-                                        
-                                        # Compute metrics for upstream and downstream
-                                        results_batch = S2_with_LST_ET.map(compute_all_metrics_up_downstream)
-                                        
-                                        # Convert to DataFrame
-                                        df_batch = geemap.ee_to_df(ee.FeatureCollection(results_batch))
-                                        df_list.append(df_batch)
-                                        progress_bar.progress((i+1)/num_batches)
+                                            # Process this batch through the entire pipeline
+                                            S2_IC_batch = S2_Export_for_visual_flowdir(dam_batch_fc, waterway_fc)
+                                            S2_with_LST_ET = S2_IC_batch.map(add_landsat_lst_et)
+                                            results_batch = S2_with_LST_ET.map(compute_all_metrics_up_downstream)
+                                            
+                                            # Convert directly to DataFrame
+                                            df_batch = geemap.ee_to_df(ee.FeatureCollection(results_batch))
+                                            df_list.append(df_batch)
+                                            progress_bar.progress((i+1)/num_batches)
+                                        except Exception as e:
+                                            st.warning(f"Error processing batch {i+1}: {e}")
+                                            # Continue with the next batch instead of stopping
+                                            continue
 
-                                    final_df = pd.concat(df_list)
+                                    # Combine all batch results
+                                    if len(df_list) > 0:
+                                        final_df = pd.concat(df_list, ignore_index=True)
+                                    else:
+                                        st.error("All batches failed processing. Please check your data.")
+                                        st.stop()
+
                                     final_df['Dam_status'] = final_df['Dam_status'].replace({'positive': 'Dam', 'negative': 'Non-dam'})
                                     st.session_state.final_df = final_df
 
@@ -865,14 +1002,54 @@ if st.session_state.questionnaire_shown:
                                         )
                                     
                                     with col4:
-                                        csv2 = final_df.to_csv(index=False).encode('utf-8')
-                                        st.download_button(
-                                            "Download Up/Downstream Data (CSV)", 
-                                            csv2, 
-                                            "updown_data.csv", 
-                                            "text/csv",
-                                            key="download_updown_csv"
-                                        )
+                                        if 'final_df' in st.session_state and st.session_state.final_df is not None:
+                                            # Create export DataFrame with coordinates
+                                            export_df = st.session_state.final_df.copy()
+                                            
+                                            # Extract coordinates and merge with main data
+                                            if 'Dam_data' in st.session_state:
+                                                coords_df = extract_coordinates_df(st.session_state.Dam_data)
+                                                
+                                                if not coords_df.empty:
+                                                    # Calculate number of months per point
+                                                    months_per_point = len(export_df) // len(coords_df)
+                                                    
+                                                    # Create a list to store coordinates
+                                                    longitudes = []
+                                                    latitudes = []
+                                                    
+                                                    # Assign coordinates to each point's data
+                                                    for i in range(len(coords_df)):
+                                                        coords = coords_df.iloc[i]
+                                                        # Add coordinates for each month
+                                                        for _ in range(months_per_point):
+                                                            longitudes.append(coords['longitude'])
+                                                            latitudes.append(coords['latitude'])
+                                                    
+                                                    # Add coordinates to export_df
+                                                    export_df['longitude'] = longitudes
+                                                    export_df['latitude'] = latitudes
+                                                    
+
+                                                else:
+                                                    st.warning("No coordinates were extracted from the features")
+                                                    # Add placeholder columns
+                                                    export_df['longitude'] = 0
+                                                    export_df['latitude'] = 0
+                                            else:
+                                                st.error("Dam_data not found in session state")
+                                                # Add placeholder columns
+                                                export_df['longitude'] = 0
+                                                export_df['latitude'] = 0
+                                                
+                                            csv2 = export_df.to_csv(index=False).encode('utf-8')
+                                            st.download_button(
+                                                "Download Up/Downstream Data (CSV)", 
+                                                csv2, 
+                                                "updown_data.csv", 
+                                                "text/csv",
+                                                key="download_updown_csv"
+                                            )
                             except Exception as e:
                                 st.error(f"Analysis error: {e}")
                                 st.code(traceback.format_exc())
@@ -890,9 +1067,51 @@ if st.session_state.questionnaire_shown:
                                       key="redisplay_updown_fig")
                                       
                     with col4:
-                        if 'final_df' in st.session_state:
-                            csv2 = st.session_state.final_df.to_csv(index=False).encode('utf-8')
-                            st.download_button("Download Up/Downstream Data (CSV)", csv2, "updown_data.csv", "text/csv",
-                                          key="redisplay_updown_csv")
+                        if 'final_df' in st.session_state and st.session_state.final_df is not None:
+                            # Create export DataFrame with coordinates
+                            export_df = st.session_state.final_df.copy()
+                            
+                            # Extract coordinates and merge with main data
+                            if 'Dam_data' in st.session_state:
+                                coords_df = extract_coordinates_df(st.session_state.Dam_data)
+                                
+                                if not coords_df.empty:                                    
+                                    # Create a list to store coordinates
+                                    longitudes = []
+                                    latitudes = []
+                                    
+                                    # Assign coordinates to each point's data
+                                    for i in range(len(coords_df)):
+                                        coords = coords_df.iloc[i]
+                                        # Add coordinates for each month
+                                        for _ in range(months_per_point):
+                                            longitudes.append(coords['longitude'])
+                                            latitudes.append(coords['latitude'])
+                                    
+                                    # Add coordinates to export_df
+                                    export_df['longitude'] = longitudes
+                                    export_df['latitude'] = latitudes
+                                    
+                                else:
+                                    st.warning("No coordinates were extracted from the features")
+                                    # Add placeholder columns
+                                    export_df['longitude'] = 0
+                                    export_df['latitude'] = 0
+                            else:
+                                st.error("Dam_data not found in session state")
+                                # Add placeholder columns
+                                export_df['longitude'] = 0
+                                export_df['latitude'] = 0
+                                
+                            csv2 = export_df.to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                "Download Up/Downstream Data (CSV)", 
+                                csv2, 
+                                "updown_data.csv", 
+                                "text/csv",
+                                key="download_updown_csv"
+                            )
                                           
                     st.success("Upstream & downstream analysis data loaded from session.")
+    st.info('You can make the Beaver Impacts Tool better by filling out our [feedback form](https://docs.google.com/forms/d/e/1FAIpQLSeE1GP7OptA4-z8Melz2AHxNsddtL9ZgJVXdVVtxLsrljJ10Q/viewform?usp=sharing).' )
+
