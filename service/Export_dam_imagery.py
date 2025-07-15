@@ -1,3 +1,17 @@
+"""
+Export Dam Imagery Module
+
+Handles the export and processing of satellite imagery for dam impact analysis.
+Provides functionality to extract pixel-level data from Sentinel-2 imagery
+for environmental monitoring and research purposes.
+
+Key Functions:
+- S2_PixelExtraction_Export: Main function for extracting Sentinel-2 pixel data
+- Applies cloud masking and elevation filtering
+- Integrates multiple satellite datasets for comprehensive analysis
+- Handles temporal filtering and spatial constraints
+"""
+
 import ee
 
 from .common_utilities import create_elevation_mask
@@ -8,6 +22,19 @@ initialize_earth_engine()
 
 
 def S2_PixelExtraction_Export(Dam_Collection, S2, Hydro, selected_datasets):
+    """
+    Extract pixel-level data from Sentinel-2 imagery for dam impact analysis.
+
+    Args:
+        Dam_Collection: Earth Engine FeatureCollection containing dam locations
+        S2: Sentinel-2 ImageCollection for analysis
+        Hydro: Hydrography dataset for water body analysis
+        selected_datasets: List of additional datasets to include in analysis
+
+    Returns:
+        Earth Engine FeatureCollection with extracted pixel data and metadata
+    """
+
     def extract_pixels(box):
         imageDate = ee.Date(box.get("Survey_Date"))
         StartDate = imageDate.advance(-6, "month").format("YYYY-MM-dd")
@@ -154,7 +181,7 @@ def Sentinel_Only_Export(Dam_Collection, S2):
         StartDate = imageDate.advance(-6, "month").format("YYYY-MM-dd")
         EndDate = imageDate.advance(6, "month").format("YYYY-MM-dd")
         boxArea = box.geometry()
-        DateString = box.get("stringID")
+        # DateString = box.get("stringID")  # Unused variable
         damId = box.get("id_property")
         DamStatus = box.get("Dam")
         DamDate = box.get("Damdate")
@@ -166,7 +193,7 @@ def Sentinel_Only_Export(Dam_Collection, S2):
             image_date = ee.Date(image.get("system:time_start"))
             image_month = image_date.get("month")
             image_year = image_date.get("year")
-            cloud = image.get("CLOUDY_PIXEL_PERCENTAGE")
+            # cloud = image.get("CLOUDY_PIXEL_PERCENTAGE")  # Unused variable
             # intersect = image.get('intersection_ratio')
 
             # Extract sample area from elevation
@@ -194,7 +221,7 @@ def Sentinel_Only_Export(Dam_Collection, S2):
                 .clip(boxArea)
             )
             Full_image2 = Full_image.addBands(elevation_masked2)
-            ## maybe add point geo as a property
+            # maybe add point geo as a property
 
             return Full_image2
 

@@ -1,3 +1,17 @@
+"""
+Quick Analysis Page
+
+A streamlined interface for rapid environmental impact analysis of beaver dams.
+Provides a simplified workflow for users who need quick results without extensive customization.
+
+Features:
+- Simplified dam location upload
+- Automatic negative point generation
+- Basic buffer creation with elevation masking
+- Environmental metrics visualization (NDVI, NDWI, LST, ET)
+- Time series plots comparing dam vs non-dam areas
+"""
+
 import ee
 import geemap.foliumap as geemap
 import matplotlib.pyplot as plt
