@@ -1,5 +1,4 @@
-import ee
-
+from .common_utilities import add_acquisition_date, add_sentinel2_cloud_mask
 from .earth_engine_auth import initialize_earth_engine
 
 initialize_earth_engine()
@@ -11,20 +10,7 @@ def process_Sentinel2_with_cloud_coverage(S2_collection):
     adding acquisition date, and calculating cloud coverage percentage.
     """
 
-    # Add cloud mask band
-    def add_cloud_mask_band(image):
-        qa = image.select("QA60")
-
-        # Bits 10 and 11 are clouds and cirrus, respectively.
-        cloudBitMask = 1 << 10
-        cirrusBitMask = 1 << 11
-
-        # Both flags should be set to zero, indicating clear conditions.
-        cloud_mask = qa.bitwiseAnd(cloudBitMask).eq(0).And(qa.bitwiseAnd(cirrusBitMask).eq(0))
-        # Create a band with values 1 (clear) and 0 (cloudy or cirrus) and convert from byte to Uint16
-        cloud_mask_band = cloud_mask.rename("cloudMask").toUint16()
-
-        return image.addBands(cloud_mask_band)
+    # Use centralized cloud masking function
 
     # Rename bands
     oldBandNames = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B11", "B12", "cloudMask"]
@@ -48,11 +34,9 @@ def process_Sentinel2_with_cloud_coverage(S2_collection):
         return image.select(oldBandNames).rename(newBandNames)
 
     # Add acquisition date
-    def add_acquisition_date(image):
-        date = ee.Date(image.get("system:time_start"))
-        return image.set("acquisition_date", date)
+    # Use centralized acquisition date function
 
     # Process the collection
-    processed_collection = S2_collection.map(add_cloud_mask_band).map(rename_bands).map(add_acquisition_date)
+    processed_collection = S2_collection.map(add_sentinel2_cloud_mask).map(rename_bands).map(add_acquisition_date)
 
     return processed_collection

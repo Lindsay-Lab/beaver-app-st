@@ -101,28 +101,12 @@ if "Positive_collection" in st.session_state:
                 negativePoints = sampleNegativePoints(positive_dams_fc, hydroRaster, innerRadius, outerRadius, 10)
                 negativePoints = negativePoints.map(lambda feature: feature.set("Dam", "negative").set("date", full_date))
 
-                fc = negativePoints
-                features_list = fc.toList(fc.size())
-                indices = ee.List.sequence(0, fc.size().subtract(1))
+                from service.common_utilities import set_feature_ids
 
-                def set_id_negatives2(idx):
-                    idx = ee.Number(idx)
-                    feature = ee.Feature(features_list.get(idx))
-                    return feature.set("id_property", ee.String("N").cat(idx.add(1).int().format()))
-
-                Neg_points_id = ee.FeatureCollection(indices.map(set_id_negatives2))
+                Neg_points_id = set_feature_ids(negativePoints, "N")
 
                 Pos_collection = st.session_state.Positive_collection.map(lambda feature: feature.set("Dam", "positive"))
-
-                pos_features_list = Pos_collection.toList(Pos_collection.size())
-                pos_indices = ee.List.sequence(0, Pos_collection.size().subtract(1))
-
-                def set_id_positives(idx):
-                    idx = ee.Number(idx)
-                    feature = ee.Feature(pos_features_list.get(idx))
-                    return feature.set("id_property", ee.String("P").cat(idx.add(1).int().format()))
-
-                Positive_dam_id = ee.FeatureCollection(pos_indices.map(set_id_positives))
+                Positive_dam_id = set_feature_ids(Pos_collection, "P")
                 Merged_collection = Positive_dam_id.merge(Neg_points_id)
                 st.session_state["Merged_collection"] = Merged_collection
 

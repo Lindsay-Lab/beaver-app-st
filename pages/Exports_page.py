@@ -417,26 +417,14 @@ if st.session_state.questionnaire_shown:
                             )
                             if negative_feature_collection:
                                 # Process negative sample data
-                                fc = negative_feature_collection
-                                features_list = fc.toList(fc.size())
-                                indices = ee.List.sequence(0, fc.size().subtract(1))
+                                from service.common_utilities import set_feature_ids_with_date_fallback
 
-                                def set_id_negatives2(idx):
-                                    idx = ee.Number(idx)
-                                    feature = ee.Feature(features_list.get(idx))
-                                    # Ensure each negative sample has a date property
-                                    date = feature.get("date")
-                                    if not date:
-                                        # Get date from the first positive sample
-                                        first_pos = st.session_state.Positive_collection.first()
-                                        date = first_pos.get("date")
-                                    return (
-                                        feature.set("id_property", ee.String("N").cat(idx.add(1).int().format()))
-                                        .set("date", date)
-                                        .set("Dam", "negative")
-                                    )
-
-                                Neg_points_id = ee.FeatureCollection(indices.map(set_id_negatives2))
+                                Neg_points_id = set_feature_ids_with_date_fallback(
+                                    negative_feature_collection,
+                                    "N",
+                                    st.session_state.Positive_collection,
+                                    dam_status="negative",
+                                )
 
                                 # Process positive samples
                                 if not st.session_state.use_all_dams:
@@ -446,23 +434,9 @@ if st.session_state.questionnaire_shown:
 
                                 Pos_collection = Pos_collection.map(lambda feature: feature.set("Dam", "positive"))
 
-                                pos_features_list = Pos_collection.toList(Pos_collection.size())
-                                pos_indices = ee.List.sequence(0, Pos_collection.size().subtract(1))
-
-                                def set_id_positives(idx):
-                                    idx = ee.Number(idx)
-                                    feature = ee.Feature(pos_features_list.get(idx))
-                                    # Ensure each positive sample has a date property
-                                    date = feature.get("date")
-                                    if not date:
-                                        # Get date from the first positive sample
-                                        first_pos = st.session_state.Positive_collection.first()
-                                        date = first_pos.get("date")
-                                    return feature.set("id_property", ee.String("P").cat(idx.add(1).int().format())).set(
-                                        "date", date
-                                    )
-
-                                Positive_dam_id = ee.FeatureCollection(pos_indices.map(set_id_positives))
+                                Positive_dam_id = set_feature_ids_with_date_fallback(
+                                    Pos_collection, "P", st.session_state.Positive_collection
+                                )
 
                                 # Create merged collection
                                 Merged_collection = Positive_dam_id.merge(Neg_points_id)
@@ -576,17 +550,9 @@ if st.session_state.questionnaire_shown:
                                 st.stop()
 
                             # Process negative points
-                            fc = negativePoints
-                            features_list = fc.toList(fc.size())
-                            indices = ee.List.sequence(0, fc.size().subtract(1))
+                            from service.common_utilities import set_feature_ids
 
-                            def set_id_negatives2(idx):
-                                idx = ee.Number(idx)
-                                feature = ee.Feature(features_list.get(idx))
-                                labeled_feature = feature.set("id_property", ee.String("N").cat(idx.add(1).int().format()))
-                                return labeled_feature
-
-                            Neg_points_id = ee.FeatureCollection(indices.map(set_id_negatives2))
+                            Neg_points_id = set_feature_ids(negativePoints, "N")
 
                             # Use filtered positive dams if only valid dams are selected
                             if not st.session_state.use_all_dams:
@@ -596,16 +562,7 @@ if st.session_state.questionnaire_shown:
 
                             Pos_collection = Pos_collection.map(lambda feature: feature.set("Dam", "positive"))
 
-                            pos_features_list = Pos_collection.toList(Pos_collection.size())
-                            pos_indices = ee.List.sequence(0, Pos_collection.size().subtract(1))
-
-                            def set_id_positives(idx):
-                                idx = ee.Number(idx)
-                                feature = ee.Feature(pos_features_list.get(idx))
-                                labeled_feature = feature.set("id_property", ee.String("P").cat(idx.add(1).int().format()))
-                                return labeled_feature
-
-                            Positive_dam_id = ee.FeatureCollection(pos_indices.map(set_id_positives))
+                            Positive_dam_id = set_feature_ids(Pos_collection, "P")
                             Merged_collection = Positive_dam_id.merge(Neg_points_id)
                             st.session_state.Merged_collection = Merged_collection
                             st.session_state.buffer_complete = True

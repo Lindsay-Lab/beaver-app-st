@@ -1,5 +1,6 @@
 import ee
 
+from .common_utilities import create_elevation_mask
 from .constants import MAX_PIXELS_SMALL, SENTINEL2_SCALE
 from .earth_engine_auth import initialize_earth_engine
 
@@ -168,27 +169,9 @@ def Sentinel_Only_Export(Dam_Collection, S2):
             cloud = image.get("CLOUDY_PIXEL_PERCENTAGE")
             # intersect = image.get('intersection_ratio')
 
-            dataset = ee.Image("USGS/3DEP/10m")
-            elevation_select = dataset.select("elevation")
-            elevation = ee.Image(elevation_select)
-
             # Extract sample area from elevation
             point_geom = DamGeo
-
-            # Extract elevation of dam location
-            point_elevation = ee.Number(elevation.sample(point_geom, 10).first().get("elevation"))
-            buffered_area = boxArea
-            elevation_clipped = elevation.clip(buffered_area)
-
-            # Create elevation radius around point to sample from
-            point_plus = point_elevation.add(3)
-            point_minus = point_elevation.subtract(5)
-            elevation_masked = (
-                elevation_clipped.where(elevation_clipped.lt(point_minus), 0)
-                .where(elevation_clipped.gt(point_minus), 1)
-                .where(elevation_clipped.gt(point_plus), 0)
-            )
-            elevation_masked2 = elevation_masked.updateMask(elevation_masked.eq(1))
+            elevation_masked2 = create_elevation_mask(image, point_geom, boxArea, upper_threshold=3, lower_threshold=5)
 
             # Add bands, create new "id" property to name the file, and clip the images to the ROI
             # Full_image = image.set("First_id", ee.String(damId).cat("_").cat(DamStatus).cat("_S2id:_").cat(index).cat("_").cat(DamDate).cat("_intersect_").cat(intersect))\

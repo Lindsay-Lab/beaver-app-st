@@ -2,6 +2,13 @@ import ee
 import pandas as pd
 import streamlit as st
 
+from .common_utilities import (
+    add_acquisition_date,
+    add_landsat_cloud_mask,
+    add_sentinel2_cloud_mask,
+    create_elevation_mask,
+    standardize_sentinel2_bands,
+)
 from .constants import (
     ELEVATION_BUFFER_RADIUS,
     LANDSAT_SCALE,
@@ -37,25 +44,11 @@ def S2_Export_for_visual(Dam_Collection):
 
             S2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
 
-            def add_cloud_mask_band(image):
-                qa = image.select("QA60")
-                cloudBitMask = 1 << 10
-                cirrusBitMask = 1 << 11
-                cloud_mask = qa.bitwiseAnd(cloudBitMask).eq(0).And(qa.bitwiseAnd(cirrusBitMask).eq(0))
-                cloud_mask_band = cloud_mask.rename("cloudMask").toUint16()
-                return image.addBands(cloud_mask_band)
+            S2_cloud_band = S2.map(add_sentinel2_cloud_mask)
 
-            S2_cloud_band = S2.map(add_cloud_mask_band)
+            S2_named_bands = S2_cloud_band.map(standardize_sentinel2_bands)
 
-            oldBandNames = ["B2", "B3", "B4", "B8", "cloudMask"]
-            newBandNames = ["S2_Blue", "S2_Green", "S2_Red", "S2_NIR", "S2_Binary_cloudMask"]
-            S2_named_bands = S2_cloud_band.map(lambda image: image.select(oldBandNames).rename(newBandNames))
-
-            def addAcquisitionDate(image):
-                date = ee.Date(image.get("system:time_start"))
-                return image.set("acquisition_date", date)
-
-            S2_cloud_filter = S2_named_bands.map(addAcquisitionDate)
+            S2_cloud_filter = S2_named_bands.map(add_acquisition_date)
             filteredCollection = S2_cloud_filter.filterDate(StartDate, EndDate).filterBounds(boxArea)
 
             def add_band(image):
@@ -64,23 +57,7 @@ def S2_Export_for_visual(Dam_Collection):
                 image_month = image_date.get("month")
                 image_year = image_date.get("year")
 
-                dataset = ee.Image("USGS/3DEP/10m")
-                elevation_select = dataset.select("elevation")
-                elevation = ee.Image(elevation_select)
-
-                point_geom = point_geo  # Use processed point_geo
-                point_elevation = ee.Number(elevation.sample(point_geom, 10).first().get("elevation"))
-                buffered_area = boxArea
-                elevation_clipped = elevation.clip(buffered_area)
-
-                point_plus = point_elevation.add(3)
-                point_minus = point_elevation.subtract(5)
-                elevation_masked = (
-                    elevation_clipped.where(elevation_clipped.lt(point_minus), 0)
-                    .where(elevation_clipped.gt(point_minus), 1)
-                    .where(elevation_clipped.gt(point_plus), 0)
-                )
-                elevation_masked2 = elevation_masked.updateMask(elevation_masked.eq(1))
+                elevation_masked2 = create_elevation_mask(image, point_geo, boxArea, upper_threshold=3, lower_threshold=5)
 
                 Full_image = (
                     image.set(
@@ -156,35 +133,14 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
         S2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
 
         ## Add band for cloud coverage
-        def add_cloud_mask_band(image):
-            qa = image.select("QA60")
-
-            # Bits 10 and 11 are clouds and cirrus, respectively.
-            cloudBitMask = 1 << 10
-            cirrusBitMask = 1 << 11
-
-            # Both flags should be set to zero, indicating clear conditions.
-            cloud_mask = qa.bitwiseAnd(cloudBitMask).eq(0).And(qa.bitwiseAnd(cirrusBitMask).eq(0))
-            # Create a band with values 1 (clear) and 0 (cloudy or cirrus) and convert from byte to Uint16
-            cloud_mask_band = cloud_mask.rename("cloudMask").toUint16()
-
-            return image.addBands(cloud_mask_band)
-
         # Define the dataset
-        S2_cloud_band = S2.map(add_cloud_mask_band)
+        S2_cloud_band = S2.map(add_sentinel2_cloud_mask)
 
         # Change band names
-        oldBandNames = ["B2", "B3", "B4", "B8", "cloudMask"]
-        newBandNames = ["S2_Blue", "S2_Green", "S2_Red", "S2_NIR", "S2_Binary_cloudMask"]  # 'S2_NDVI']
-
-        S2_named_bands = S2_cloud_band.map(lambda image: image.select(oldBandNames).rename(newBandNames))
+        S2_named_bands = S2_cloud_band.map(standardize_sentinel2_bands)
 
         # Define a function to add the masked image as a band to the images
-        def addAcquisitionDate(image):
-            date = ee.Date(image.get("system:time_start"))
-            return image.set("acquisition_date", date)
-
-        S2_cloud_filter = S2_named_bands.map(addAcquisitionDate)
+        S2_cloud_filter = S2_named_bands.map(add_acquisition_date)
 
         filteredCollection = S2_cloud_filter.filterDate(StartDate, EndDate).filterBounds(boxArea)
 
@@ -204,26 +160,9 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
 
             waterway_state = filtered_waterway.filterBounds(buffered_geometry)
 
-            dataset = ee.Image("USGS/3DEP/10m")
-            elevation_select = dataset.select("elevation")
-            elevation = ee.Image(elevation_select)
-
-            # point_geom = firstFeature.geometry()
-            point_elevation = ee.Number(elevation.sample(point_geom, 10).first().get("elevation"))
-
-            # Clip and mask based on some +/- thresholds
-            point_plus = point_elevation.add(3)
-            point_minus = point_elevation.subtract(10)
-            elevation_clipped = elevation.clip(buffered_geometry)
-
-            # 1 = within range, 0 = outside range
-            elevation_masked = (
-                elevation_clipped.where(elevation_clipped.lt(point_minus), 0)
-                .where(elevation_clipped.gt(point_minus), 1)
-                .where(elevation_clipped.gt(point_plus), 0)
+            elevation_masked2 = create_elevation_mask(
+                image, point_geom, buffered_geometry, upper_threshold=3, lower_threshold=10
             )
-
-            elevation_masked2 = elevation_masked.updateMask(elevation_masked.eq(1))
 
             def find_closest_flowline(point_geom, waterway=filtered_waterway):
                 # Filter to flowlines within some max distance bounding box
@@ -660,12 +599,7 @@ def add_landsat_lst(s2_image):
         return image.addBands(opticalBands, overwrite=True).addBands(thermalBands, overwrite=True)
 
     # Function to mask clouds
-    def cloud_mask(image):
-        cloudShadowBitmask = 1 << 3
-        cloudBitmask = 1 << 5
-        qa = image.select("QA_PIXEL")
-        mask = qa.bitwiseAnd(cloudShadowBitmask).eq(0).And(qa.bitwiseAnd(cloudBitmask).eq(0))
-        return image.updateMask(mask)
+    # Use centralized Landsat cloud masking function
 
     # Build the Landsat collection
     landsat_col = (
@@ -673,7 +607,7 @@ def add_landsat_lst(s2_image):
         .filterDate(start_date, end_date)
         .filterBounds(boxArea)
         .map(apply_scale_factors)
-        .map(cloud_mask)
+        .map(add_landsat_cloud_mask)
     )
 
     # Compute NDVI stats on each image to ensure we only keep valid images
@@ -719,10 +653,7 @@ def add_landsat_lst_et(s2_image):
         thermalBands = image.select("ST_B.*").multiply(0.00341802).add(149.0)
         return image.addBands(opticalBands, overwrite=True).addBands(thermalBands, overwrite=True)
 
-    def cloud_mask(image):
-        qa = image.select("QA_PIXEL")
-        mask = qa.bitwiseAnd(1 << 3).eq(0).And(qa.bitwiseAnd(1 << 5).eq(0))
-        return image.updateMask(mask)
+    # Use centralized Landsat cloud masking function
 
     # st.write("DEBUG: Fetching Landsat collection")
     landsat_col = (
@@ -730,7 +661,7 @@ def add_landsat_lst_et(s2_image):
         .filterDate(start_date, end_date)
         .filterBounds(boxArea)
         .map(apply_scale_factors)
-        .map(cloud_mask)
+        .map(add_landsat_cloud_mask)
     )
 
     # st.write(f"DEBUG: Landsat collection size")

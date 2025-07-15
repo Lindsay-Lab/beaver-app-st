@@ -17,15 +17,9 @@ def set_id_year_property_GEE_Collection(feature):
 
 def set_id_negatives(feature_collection):
     """Set IDs for negative points in a feature collection."""
-    features_list = feature_collection.toList(feature_collection.size())
-    indices = ee.List.sequence(0, feature_collection.size().subtract(1))
+    from .common_utilities import set_feature_ids
 
-    def set_id(idx):
-        idx = ee.Number(idx)
-        feature = ee.Feature(features_list.get(idx))
-        return feature.set("id_property", ee.String("N").cat(idx.add(1).int().format()))
-
-    return ee.FeatureCollection(indices.map(set_id))
+    return set_feature_ids(feature_collection, "N")
 
 
 def add_dam_buffer_and_standardize_date(feature, buffer_radius=None, date_override=None):
