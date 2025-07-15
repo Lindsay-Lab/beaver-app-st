@@ -1,6 +1,7 @@
 venv/
 smenv/
 .DS_Store
+CLAUDE.md
 __pycache__/
 *.pyc
 *.pyo
