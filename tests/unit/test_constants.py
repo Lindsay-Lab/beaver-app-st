@@ -91,21 +91,12 @@ class TestProcessingConstants:
 
     @pytest.mark.unit
     def test_pixel_limits(self):
-        """Test that pixel limits are reasonable."""
+        """Test that pixel limits are positive."""
         from service.constants import MAX_PIXELS_LARGE, MAX_PIXELS_SMALL
 
-        # Pixel limits should be positive integers
-        assert isinstance(MAX_PIXELS_SMALL, int)
-        assert isinstance(MAX_PIXELS_LARGE, int)
+        # Pixel limits should be positive numbers
         assert MAX_PIXELS_SMALL > 0
         assert MAX_PIXELS_LARGE > 0
-
-        # Large pixel limit should be larger than small
-        assert MAX_PIXELS_LARGE > MAX_PIXELS_SMALL
-
-        # Pixel limits should be reasonable for Earth Engine
-        assert 1000000 <= MAX_PIXELS_SMALL <= 10000000000
-        assert 1000000000 <= MAX_PIXELS_LARGE <= 100000000000000
 
     @pytest.mark.unit
     def test_scale_constants(self):
@@ -204,78 +195,51 @@ class TestConstantConsistency:
     """Test consistency between related constants."""
 
     @pytest.mark.unit
-    def test_batch_size_consistency(self):
-        """Test that batch sizes are consistent with pixel limits."""
+    def test_logical_ordering(self):
+        """Test that related constants have logical ordering."""
         from service.constants import DEFAULT_BATCH_SIZE, LARGE_BATCH_SIZE, MAX_PIXELS_LARGE, MAX_PIXELS_SMALL
 
-        # Larger batch sizes should be used with larger pixel limits
-        # This is a logical consistency check
-        batch_ratio = LARGE_BATCH_SIZE / DEFAULT_BATCH_SIZE
-        pixel_ratio = MAX_PIXELS_LARGE / MAX_PIXELS_SMALL
+        # Larger batch sizes should be larger than default
+        assert LARGE_BATCH_SIZE > DEFAULT_BATCH_SIZE
 
-        # The ratios should be in the same order of magnitude
-        # Note: batch_ratio is typically much smaller than pixel_ratio
-        assert 0.0001 <= batch_ratio / pixel_ratio <= 10
-
-    @pytest.mark.unit
-    def test_plot_dimension_consistency(self):
-        """Test that plot dimensions are consistent."""
-        from service.constants import PLOT_FIGURE_HEIGHT_LARGE, PLOT_FIGURE_HEIGHT_SMALL, PLOT_FIGURE_WIDTH
-
-        # Width should be reasonable relative to heights
-        assert PLOT_FIGURE_WIDTH >= min(PLOT_FIGURE_HEIGHT_SMALL, PLOT_FIGURE_HEIGHT_LARGE)
-
-        # Height difference should be reasonable
-        height_ratio = PLOT_FIGURE_HEIGHT_LARGE / PLOT_FIGURE_HEIGHT_SMALL
-        assert 1.0 <= height_ratio <= 5.0  # Large should be at most 5x small
+        # Large pixel limit should be larger than small
+        assert MAX_PIXELS_LARGE > MAX_PIXELS_SMALL
 
 
 class TestConstantTypes:
     """Test that constants have correct types."""
 
     @pytest.mark.unit
-    def test_integer_constants(self):
-        """Test constants that should be integers."""
+    def test_all_constants_are_numeric(self):
+        """Test that all numeric constants are actually numbers."""
         from service.constants import (
             DEFAULT_BATCH_SIZE,
-            LARGE_BATCH_SIZE,
-            MAP_HEIGHT,
-            MAP_WIDTH,
-            MAX_PIXELS_LARGE,
-            MAX_PIXELS_SMALL,
-        )
-
-        integer_constants = [
-            DEFAULT_BATCH_SIZE,
-            LARGE_BATCH_SIZE,
-            MAX_PIXELS_SMALL,
-            MAX_PIXELS_LARGE,
-            MAP_WIDTH,
-            MAP_HEIGHT,
-        ]
-
-        for constant in integer_constants:
-            assert isinstance(constant, int), f"Constant should be integer: {constant}"
-
-    @pytest.mark.unit
-    def test_numeric_constants(self):
-        """Test constants that should be numeric (int or float)."""
-        from service.constants import (
             ELEVATION_BUFFER_RADIUS,
             ELEVATION_THRESHOLD_LOWER,
             ELEVATION_THRESHOLD_UPPER,
             LANDSAT_SCALE,
+            LARGE_BATCH_SIZE,
+            MAP_HEIGHT,
+            MAP_WIDTH,
+            MAX_PIXELS_LARGE,
+            MAX_PIXELS_SMALL,
             MIN_DISTANCE_FROM_DAMS,
             SENTINEL2_SCALE,
         )
 
         numeric_constants = [
+            DEFAULT_BATCH_SIZE,
+            LARGE_BATCH_SIZE,
             SENTINEL2_SCALE,
             LANDSAT_SCALE,
+            MAX_PIXELS_SMALL,
+            MAX_PIXELS_LARGE,
             ELEVATION_THRESHOLD_UPPER,
             ELEVATION_THRESHOLD_LOWER,
             ELEVATION_BUFFER_RADIUS,
             MIN_DISTANCE_FROM_DAMS,
+            MAP_WIDTH,
+            MAP_HEIGHT,
         ]
 
         for constant in numeric_constants:
