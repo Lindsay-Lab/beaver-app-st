@@ -218,7 +218,7 @@ def upload_non_dam_points_to_ee(file, dam_date=None, widget_prefix=""):
                 dam_date = first_feature.get("date").getInfo()
                 if not dam_date:
                     dam_date = "2020-07-01"  # Default date
-            except:
+            except Exception:
                 dam_date = "2020-07-01"  # Default date
         else:
             dam_date = "2020-07-01"  # Default date

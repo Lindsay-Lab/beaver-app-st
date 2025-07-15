@@ -23,8 +23,8 @@ from .earth_engine_auth import initialize_earth_engine
 initialize_earth_engine()
 
 
-####### Functions to for filtering collection
-### Filtering without flow direction
+# Functions to for filtering collection
+# Filtering without flow direction
 def S2_Export_for_visual(Dam_Collection):
     def extract_pixels(box):
         try:
@@ -117,7 +117,7 @@ def S2_Export_for_visual(Dam_Collection):
     return ee.ImageCollection(ImageryCollections)
 
 
-##### Filtering with flowline
+# Filtering with flowline
 def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
     def extract_pixels(box):
         imageDate = ee.Date(box.get("Survey_Date"))
@@ -130,10 +130,10 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
         damId = box.get("id_property")
         DamStatus = box.get("Dam")
         DamDate = box.get("Damdate")
-        DamGeo = box.get("Point_geo")
+        # DamGeo = box.get("Point_geo")  # Unused variable
         S2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
 
-        ## Add band for cloud coverage
+        # Add band for cloud coverage
         # Define the dataset
         S2_cloud_band = S2.map(add_sentinel2_cloud_mask)
 
@@ -150,10 +150,10 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             image_date = ee.Date(image.get("system:time_start"))
             image_month = image_date.get("month")
             image_year = image_date.get("year")
-            cloud = image.get("CLOUDY_PIXEL_PERCENTAGE")
+            # cloud = image.get("CLOUDY_PIXEL_PERCENTAGE")  # unused variable
             # intersect = image.get('intersection_ratio')
 
-            ### buffered_geometry
+            # buffered_geometry
             # buffered_geometry = boxArea.geometry()
             buffered_geometry = box.geometry()
             point_geom = buffered_geometry.centroid()
@@ -208,7 +208,7 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             p2 = ee.Geometry.Point(second_coord)
 
             # Create the first linestring between p1 and p2
-            line1 = ee.Geometry.LineString([p1.coordinates(), p2.coordinates()])
+            # line1 = ee.Geometry.LineString([p1.coordinates(), p2.coordinates()])  # unused variable
 
             # Cast each coordinate to an ee.Number so we can do arithmetic
             x1 = ee.Number(p1.coordinates().get(0))
@@ -229,8 +229,8 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             dx_perp = dy
             dy_perp = dx.multiply(-1)
 
-            dx_half = dx_perp.divide(2)
-            dy_half = dy_perp.divide(2)
+            # dx_half = dx_perp.divide(2)  # unused variable
+            # dy_half = dy_perp.divide(2)  # unused variable
             length_factor = 10
 
             # Scale the perpendicular vector
@@ -252,9 +252,9 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             boundingRing = ee.List(boundingCoords.get(0))  # ee.List of [ [west, south], [west, north], ... ]
 
             westSouth = ee.List(boundingRing.get(0))  # [west, south]
-            westNorth = ee.List(boundingRing.get(1))  # [west, north]
+            # westNorth = ee.List(boundingRing.get(1))  # [west, north]  # unused variable
             eastNorth = ee.List(boundingRing.get(2))  # [east, north]
-            eastSouth = ee.List(boundingRing.get(3))  # [east, south]
+            # eastSouth = ee.List(boundingRing.get(3))  # [east, south]  # unused variable
 
             west = ee.Number(westSouth.get(0))
             south = ee.Number(westSouth.get(1))
@@ -276,7 +276,7 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             bot_feature = ee.Feature(bot_poly, {"id": "bot"})
 
             # Step 2: Buffer the extended line just enough to make a thin clipping strip
-            split_strip = extended_perpendicular.buffer(1)
+            # split_strip = extended_perpendicular.buffer(1)  # unused variable
 
             def get_closest_vertex_index(coords, pt):
                 distances = coords.map(lambda c: ee.Geometry.Point(c).distance(pt))
@@ -292,7 +292,7 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             upstream_coords = line_coords.slice(0, ee.Number(closest_index).add(1))
             downstream_coords = line_coords.slice(ee.Number(closest_index), line_coords.size())
 
-            #################
+            # Processing block
 
             def ensure_two_coords(coords, main_coords, closest_idx, direction):
                 """
@@ -351,7 +351,7 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             upstream_line = ee.Geometry.LineString(final_up_coords)
             downstream_line = ee.Geometry.LineString(final_down_coords)
 
-            ##################
+            # Processing block
             # Define upstream and downstream lines
             # upstream_line = ee.Geometry.LineString(upstream_coords)
             # downstream_line = ee.Geometry.LineString(downstream_coords)
@@ -375,8 +375,8 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             features = labeled_halves.toList(labeled_halves.size())
             f1 = ee.Feature(features.get(0))
             f2 = ee.Feature(features.get(1))
-            f1_flow = f1.getString("flow")  ## upstream
-            f2_flow = f2.getString("flow")  ## both
+            f1_flow = f1.getString("flow")  # upstream
+            f2_flow = f2.getString("flow")  # both
 
             def opposite(flow_str):
                 return ee.String(ee.Algorithms.If(flow_str.equals("upstream"), "downstream", "upstream"))
@@ -542,8 +542,8 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
     return ee.ImageCollection(ImageryCollections)
 
 
-############# Functions to compute metrics
-##### Compute LST
+# Functions to compute metrics
+# Compute LST
 def compute_lst(s2_image, landsat_col, boxArea):
     """Computes LST from the median of the filtered Landsat collection."""
     median_img = landsat_col.median().clip(boxArea)
@@ -576,8 +576,8 @@ def compute_lst(s2_image, landsat_col, boxArea):
     return lst
 
 
-############# Functions to add additional datasets- Landsat LST, OPEN-ET ET
-##### JUST LST
+# Functions to add additional datasets- Landsat LST, OPEN-ET ET
+# JUST LST
 def add_landsat_lst(s2_image):
     """
     For each Sentinel-2 image:
@@ -648,7 +648,7 @@ def add_landsat_lst_et(s2_image):
     boxArea = s2_image.geometry()
     # st.write(f"DEBUG: Processing area for year")
 
-    ## STEP 1: PROCESS LANDSAT FOR LST
+    # STEP 1: PROCESS LANDSAT FOR LST
     def apply_scale_factors(image):
         opticalBands = image.select("SR_B.").multiply(0.0000275).add(-0.2)
         thermalBands = image.select("ST_B.*").multiply(0.00341802).add(149.0)
@@ -735,7 +735,7 @@ def add_landsat_lst_et(s2_image):
     # st.write("DEBUG: Computing LST image")
     lst_image = robust_compute_lst(filtered_col, boxArea)
 
-    ## STEP 2: PROCESS OPENET ET DATA
+    # STEP 2: PROCESS OPENET ET DATA
     # st.write("DEBUG: Processing OpenET data")
     et_collection = (
         ee.ImageCollection("OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0")
@@ -752,13 +752,13 @@ def add_landsat_lst_et(s2_image):
 
     et_final = ee.Image(et_final)
 
-    ## STEP 3: ADD BANDS BACK TO SENTINEL-2 IMAGE
+    # STEP 3: ADD BANDS BACK TO SENTINEL-2 IMAGE
     # st.write("DEBUG: Adding bands back to Sentinel-2 image")
     return s2_image.addBands(lst_image).addBands(et_final).set("landsat_collection_size", collection_size)
 
 
-########### Functions to calculate means
-##### NDVI, LST
+# Functions to calculate means
+# NDVI, LST
 def compute_all_metrics(image):
     """
     Returns an ee.Feature containing mean NDVI, NDWI_Green, and LST
@@ -807,8 +807,8 @@ def compute_all_metrics(image):
     return ee.Feature(None, combined_metrics)
 
 
-####### Compute ET and include upstream and downstream
-##### NDVI, LST, ET
+# Compute ET and include upstream and downstream
+# NDVI, LST, ET
 def compute_all_metrics_LST_ET(image):
     """
     Returns an ee.Feature containing mean NDVI, NDWI_Green, LST, and ET
@@ -866,7 +866,7 @@ def compute_all_metrics_LST_ET(image):
     return ee.Feature(None, combined_metrics)
 
 
-###### Upstream and downstream
+# Upstream and downstream
 def extract_coordinates_df(dam_data):
     """
     Extract coordinates from dam data and return a DataFrame with id_property and coordinates.
@@ -906,9 +906,9 @@ def compute_all_metrics_up_downstream(image):
     downstream_mask = image.select("downstream")
 
     # Check if bands exist
-    valid_up = upstream_mask.reduceRegion(
-        reducer=ee.Reducer.count(), geometry=image.geometry(), scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_LARGE
-    ).getNumber("upstream")
+    # valid_up = upstream_mask.reduceRegion(
+    #     reducer=ee.Reducer.count(), geometry=image.geometry(), scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_LARGE
+    # ).getNumber("upstream")  # unused
 
     # 2) Compute NDVI using Sentinel-2 Red & NIR
     ndvi = calculate_ndvi(image, "S2_NIR", "S2_Red")
