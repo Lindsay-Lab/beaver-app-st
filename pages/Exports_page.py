@@ -179,7 +179,14 @@ if st.session_state.questionnaire_shown:
                         preview_map.centerObject(feature_collection)
                         preview_map.to_streamlit(width=800, height=600)
                 except Exception as e:
-                    st.error(f"Error processing file: {str(e)}")
+                    st.error("**Dam Location Upload Failed**")
+                    st.error(f"**Issue:** {str(e)}")
+                    st.info("**Common Solutions:**")
+                    st.info("• Ensure file format is CSV or GeoJSON")
+                    st.info("• Check required columns: latitude, longitude, date")
+                    st.info("• Verify coordinates are in decimal degrees (WGS84)")
+                    st.info("• Check date format is YYYY-MM-DD")
+                    st.info("• Remove any special characters or empty rows")
 
     with st.expander(
         "Step 2: Select Waterway", expanded=st.session_state.step1_complete and not st.session_state.step2_complete
@@ -332,7 +339,13 @@ if st.session_state.questionnaire_shown:
                                 validation_map.to_streamlit(width=MAP_WIDTH, height=MAP_HEIGHT)
 
                         except Exception as e:
-                            st.error(f"Error during validation: {str(e)}")
+                            st.error("**Dam Location Validation Failed**")
+                            st.error(f"**Issue:** {str(e)}")
+                            st.info("**Common Solutions:**")
+                            st.info("• Check that dam coordinates are within valid ranges")
+                            st.info("• Ensure waterway data is available for your region")
+                            st.info("• Verify dam locations are near known waterways")
+                            st.info("• Try with a smaller validation area")
 
         # Show options after validation is complete
         if st.session_state.validation_step == "show_options":
@@ -458,8 +471,15 @@ if st.session_state.questionnaire_shown:
                                 preview_map.centerObject(Merged_collection)
                                 preview_map.to_streamlit(width=800, height=600)
                         except Exception as e:
-                            st.error(f"Error processing file: {str(e)}")
-                            st.error(traceback.format_exc())  # Show detailed error information
+                            st.error("**Non-Dam Location Upload Failed**")
+                            st.error(f"**Issue:** {str(e)}")
+                            st.info("**Common Solutions:**")
+                            st.info("• Ensure file format matches dam location file")
+                            st.info("• Check required columns: latitude, longitude")
+                            st.info("• Verify coordinates are in decimal degrees")
+                            st.info("• Remove any duplicate or invalid coordinates")
+                            with st.expander("🔧 Technical Details"):
+                                st.code(traceback.format_exc())
 
             if generate_negatives_checkbox:
                 st.subheader("Specify the parameters for negative point generation:")
@@ -578,7 +598,13 @@ if st.session_state.questionnaire_shown:
                             # Set completion status
                             st.success("✅ Negative points generated successfully!")
                         except Exception as e:
-                            st.error(f"Error generating negative points: {str(e)}")
+                            st.error("**Negative Point Generation Failed**")
+                            st.error(f"**Issue:** {str(e)}")
+                            st.info("**Common Solutions:**")
+                            st.info("• Reduce the outer radius for sampling")
+                            st.info("• Check that waterway data is available")
+                            st.info("• Ensure dam locations are valid")
+                            st.info("• Try with fewer dam locations first")
 
     with st.expander(
         "Step 5: Create Buffers", expanded=st.session_state.step4_complete and not st.session_state.step5_complete
@@ -642,7 +668,13 @@ if st.session_state.questionnaire_shown:
                         st.success(f"✅ Buffers created successfully with radius {buffer_radius} meters!")
 
                     except Exception as e:
-                        st.error(f"Error creating buffers: {str(e)}")
+                        st.error("**Buffer Creation Failed**")
+                        st.error(f"**Issue:** {str(e)}")
+                        st.info("**Common Solutions:**")
+                        st.info("• Reduce buffer radius if memory issues occur")
+                        st.info("• Check that merged collection was created successfully")
+                        st.info("• Verify elevation data is available for your area")
+                        st.info("• Try processing fewer locations at once")
 
     with st.expander("Step 6: Visualize Trends", expanded=st.session_state.step5_complete):
         st.header("Step 6: Visualize Trends")
@@ -731,8 +763,15 @@ if st.session_state.questionnaire_shown:
                                 st.success("✅ Visualization complete!")
 
                             except Exception as e:
-                                st.error(f"Visualization error: {e}")
-                                st.code(traceback.format_exc())
+                                st.error("**Visualization Failed**")
+                                st.error(f"**Issue:** {str(e)}")
+                                st.info("**Common Solutions:**")
+                                st.info("• Reduce batch size in processing")
+                                st.info("• Check that buffers were created successfully")
+                                st.info("• Verify satellite imagery is available for your date range")
+                                st.info("• Try with a smaller geographic area")
+                                with st.expander("🔧 Technical Details"):
+                                    st.code(traceback.format_exc())
 
                 if st.session_state.visualization_complete:
                     st.pyplot(st.session_state.fig)
@@ -930,8 +969,15 @@ if st.session_state.questionnaire_shown:
                                                 key="download_updown_csv",
                                             )
                             except Exception as e:
-                                st.error(f"Analysis error: {e}")
-                                st.code(traceback.format_exc())
+                                st.error("**Upstream/Downstream Analysis Failed**")
+                                st.error(f"**Issue:** {str(e)}")
+                                st.info("**Common Solutions:**")
+                                st.info("• Ensure waterway data is available for your area")
+                                st.info("• Check that dam locations are near waterways")
+                                st.info("• Reduce the analysis area if memory issues occur")
+                                st.info("• Verify flow direction data is available")
+                                with st.expander("🔧 Technical Details"):
+                                    st.code(traceback.format_exc())
 
                 # Display existing results if already computed
                 elif st.session_state.upstream_analysis_complete and "fig2" in st.session_state:

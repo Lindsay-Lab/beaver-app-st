@@ -61,7 +61,13 @@ if uploaded_file:
                 st.session_state["Full_positive"] = st.session_state.Positive_collection
 
         except Exception as e:
-            st.error(f"Error uploading data: {e}")
+            st.error("**Data Upload Failed**")
+            st.error(f"**Issue:** {str(e)}")
+            st.info("**Common Solutions:**")
+            st.info("• Ensure your file is in CSV or GeoJSON format")
+            st.info("• Check that required columns (latitude, longitude, date) are present")
+            st.info("• Verify coordinates are valid (latitude: -90 to 90, longitude: -180 to 180)")
+            st.info("• Check date format is YYYY-MM-DD")
             data_confirmed = False
 else:
     data_confirmed = False
@@ -149,7 +155,13 @@ if "Positive_collection" in st.session_state:
 
                 st.success("Buffer map generated successfully!")
             except Exception as e:
-                st.error(f"Error generating buffer map: {e}")
+                st.error("**Buffer Map Generation Failed**")
+                st.error(f"**Issue:** {str(e)}")
+                st.info("**Common Solutions:**")
+                st.info("• Reduce buffer radius if memory issues occur")
+                st.info("• Check that dam locations are valid")
+                st.info("• Ensure Google Earth Engine credentials are configured")
+                st.info("• Try with a smaller dataset first")
 
 
 # -------------------- Always Show the Buffer Map (if we have it) --------------------
@@ -217,7 +229,13 @@ if st.session_state["Dam_data"]:
                 st.pyplot(fig)
 
             except Exception as e:
-                st.error(f"Visualization error: {e}")
+                st.error("**Visualization Failed**")
+                st.error(f"**Issue:** {str(e)}")
+                st.info("**Common Solutions:**")
+                st.info("• Reduce the time range or geographic area")
+                st.info("• Check that buffers were created successfully")
+                st.info("• Verify satellite imagery is available for your date range")
+                st.info("• Try processing fewer data points")
 
     if clicked_up_down:
         with st.spinner("Processing upstream and downstream visualization..."):
@@ -265,4 +283,10 @@ if st.session_state["Dam_data"]:
                 st.pyplot(fig2)
 
             except Exception as e:
-                st.error(f"Upstream/downstream visualization error: {e}")
+                st.error("**Upstream/Downstream Analysis Failed**")
+                st.error(f"**Issue:** {str(e)}")
+                st.info("**Common Solutions:**")
+                st.info("• Ensure waterway data is available for your area")
+                st.info("• Check that dam locations are near waterways")
+                st.info("• Reduce the analysis area if memory issues occur")
+                st.info("• Verify flow direction data is available")

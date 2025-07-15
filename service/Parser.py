@@ -190,7 +190,13 @@ def upload_points_to_ee(file, widget_prefix=""):
             return None
 
     except Exception as e:
-        st.error(f"An error occurred while processing the file: {e}")
+        st.error("**File Processing Failed**")
+        st.error(f"**Issue:** {str(e)}")
+        st.info("**Common Solutions:**")
+        st.info("• Ensure file is valid CSV or GeoJSON format")
+        st.info("• Check file encoding (should be UTF-8)")
+        st.info("• Verify file size is reasonable (<10MB)")
+        st.info("• Remove any special characters or formatting")
         return None
 
 
@@ -334,5 +340,11 @@ def upload_non_dam_points_to_ee(file, dam_date=None, widget_prefix=""):
             return None
 
     except Exception as e:
-        st.error(f"An error occurred while processing the file: {e}")
+        st.error("**File Processing Failed**")
+        st.error(f"**Issue:** {str(e)}")
+        st.info("**Common Solutions:**")
+        st.info("• Ensure file is valid CSV or GeoJSON format")
+        st.info("• Check file encoding (should be UTF-8)")
+        st.info("• Verify file size is reasonable (<10MB)")
+        st.info("• Remove any special characters or formatting")
         return None
