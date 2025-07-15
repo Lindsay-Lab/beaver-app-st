@@ -77,8 +77,8 @@ SENTINEL2_SCALE = 10
 LANDSAT_SCALE = 30
 
 # Earth Engine maxPixels constants
-MAX_PIXELS_SMALL = 1e9
-MAX_PIXELS_LARGE = 1e13
+MAX_PIXELS_SMALL = int(1e9)
+MAX_PIXELS_LARGE = int(1e13)
 
 # Cloud coverage thresholds
 MAX_CLOUD_COVERAGE = 20  # Maximum cloud coverage percentage
@@ -96,7 +96,7 @@ MIN_DISTANCE_FROM_DAMS = 200  # Minimum distance from dams in meters
 NEGATIVE_SAMPLE_BUFFER = 130  # Buffer for negative sampling
 
 # Visualization constants
-PLOT_FIGURE_WIDTH = 12
+PLOT_FIGURE_WIDTH = 20
 PLOT_FIGURE_HEIGHT_SMALL = 18
 PLOT_FIGURE_HEIGHT_LARGE = 20
 MAP_WIDTH = 1200

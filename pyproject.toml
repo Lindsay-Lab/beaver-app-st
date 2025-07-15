@@ -36,3 +36,24 @@ exclude = [".git", "__pycache__", "dist", "assets", "venv", ".venv"]
 per-file-ignores = [
     "__init__.py:F401",  # Allow unused imports in __init__.py files
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--verbose",
+    "--tb=short",
+    "--cov=service",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+markers = [
+    "unit: Unit tests that don't require Earth Engine",
+    "integration: Integration tests that require Earth Engine authentication",
+    "slow: Tests that take a long time to run",
+]
+env = [
+    "TESTING=true",
+]
