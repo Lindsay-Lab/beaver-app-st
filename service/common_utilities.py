@@ -2,7 +2,7 @@
 Common Utilities Module
 
 Centralized utility functions to eliminate code duplication across the application.
-Contains commonly used Earth Engine operations for ID assignment, cloud masking, 
+Contains commonly used Earth Engine operations for ID assignment, cloud masking,
 elevation processing, and metric calculations.
 """
 
@@ -167,10 +167,9 @@ def calculate_ndvi(image, nir_band, red_band):
         red_band: Red band name
 
     Returns:
-        Image with NDVI band added
+        NDVI band as an Earth Engine Image
     """
-    ndvi = image.normalizedDifference([nir_band, red_band]).rename("NDVI")
-    return image.addBands(ndvi)
+    return image.normalizedDifference([nir_band, red_band]).rename("NDVI")
 
 
 def calculate_ndwi(image, green_band, nir_band):

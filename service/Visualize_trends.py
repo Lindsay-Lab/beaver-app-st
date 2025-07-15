@@ -6,6 +6,7 @@ from .common_utilities import (
     add_acquisition_date,
     add_landsat_cloud_mask,
     add_sentinel2_cloud_mask,
+    calculate_ndvi,
     create_elevation_mask,
     standardize_sentinel2_bands,
 )
@@ -548,7 +549,7 @@ def compute_lst(s2_image, landsat_col, boxArea):
     median_img = landsat_col.median().clip(boxArea)
 
     # Compute NDVI again, just to get min/max
-    ndvi = median_img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
+    ndvi = calculate_ndvi(median_img, "SR_B5", "SR_B4")
 
     # Compute NDVI min/max
     ndvi_dict = ndvi.reduceRegion(
@@ -612,7 +613,7 @@ def add_landsat_lst(s2_image):
 
     # Compute NDVI stats on each image to ensure we only keep valid images
     def add_ndvi_stats(img):
-        ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
+        ndvi = calculate_ndvi(img, "SR_B5", "SR_B4")
         ndvi_dict = ndvi.reduceRegion(
             reducer=ee.Reducer.minMax(), geometry=boxArea, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
         )
@@ -667,7 +668,7 @@ def add_landsat_lst_et(s2_image):
     # st.write(f"DEBUG: Landsat collection size")
 
     def add_ndvi_stats(img):
-        ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
+        ndvi = calculate_ndvi(img, "SR_B5", "SR_B4")
         ndvi_dict = ndvi.reduceRegion(
             reducer=ee.Reducer.minMax(), geometry=boxArea, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
         )
@@ -683,7 +684,7 @@ def add_landsat_lst_et(s2_image):
     def robust_compute_lst(filtered_col, boxArea):
         def lst_from_image(img):
             # st.write("DEBUG: Computing LST from single image")
-            ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
+            ndvi = calculate_ndvi(img, "SR_B5", "SR_B4")
             # st.write("DEBUG: Computing NDVI stats")
             ndvi_dict = ndvi.reduceRegion(
                 reducer=ee.Reducer.minMax(), geometry=boxArea, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
@@ -768,7 +769,7 @@ def compute_all_metrics(image):
     geometry = elevation_mask.geometry()
 
     # 2) Compute NDVI using Sentinel-2 Red & NIR
-    ndvi = image.normalizedDifference(["S2_NIR", "S2_Red"]).rename("NDVI")
+    ndvi = calculate_ndvi(image, "S2_NIR", "S2_Red")
     ndvi_mean = ndvi.reduceRegion(
         reducer=ee.Reducer.mean(), geometry=geometry, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
     ).get("NDVI")
@@ -818,7 +819,7 @@ def compute_all_metrics_LST_ET(image):
     geometry = elevation_mask.geometry()
 
     # 2) Compute NDVI using Sentinel-2 Red & NIR
-    ndvi = image.normalizedDifference(["S2_NIR", "S2_Red"]).rename("NDVI")
+    ndvi = calculate_ndvi(image, "S2_NIR", "S2_Red")
     ndvi_mean = ndvi.reduceRegion(
         reducer=ee.Reducer.mean(), geometry=geometry, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
     ).get("NDVI")
@@ -910,7 +911,7 @@ def compute_all_metrics_up_downstream(image):
     ).getNumber("upstream")
 
     # 2) Compute NDVI using Sentinel-2 Red & NIR
-    ndvi = image.normalizedDifference(["S2_NIR", "S2_Red"]).rename("NDVI")
+    ndvi = calculate_ndvi(image, "S2_NIR", "S2_Red")
 
     # Upstream NDVI
     ndvi_up_img = ndvi.updateMask(upstream_mask)
