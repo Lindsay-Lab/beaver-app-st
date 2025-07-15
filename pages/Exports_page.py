@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 import streamlit as st
-from google.oauth2 import service_account
 
+from service.earth_engine_auth import initialize_earth_engine
 from service.Negative_sample_functions import prepareHydro, sampleNegativePoints
 from service.Parser import upload_non_dam_points_to_ee, upload_points_to_ee
 from service.Validation_service import (
@@ -24,6 +24,8 @@ from service.Visualize_trends import (
     compute_all_metrics_LST_ET,
     compute_all_metrics_up_downstream,
 )
+
+initialize_earth_engine()
 
 
 def extract_coordinates_df(dam_data):
@@ -78,26 +80,6 @@ def extract_coordinates_df(dam_data):
         return pd.DataFrame(columns=["id_property", "longitude", "latitude"])
 
 
-credentials_info = {
-    "type": st.secrets["gcp_service_account"]["type"],
-    "project_id": st.secrets["gcp_service_account"]["project_id"],
-    "private_key_id": st.secrets["gcp_service_account"]["private_key_id"],
-    "private_key": st.secrets["gcp_service_account"]["private_key"],
-    "client_email": st.secrets["gcp_service_account"]["client_email"],
-    "client_id": st.secrets["gcp_service_account"]["client_id"],
-    "auth_uri": st.secrets["gcp_service_account"]["auth_uri"],
-    "token_uri": st.secrets["gcp_service_account"]["token_uri"],
-    "auth_provider_x509_cert_url": st.secrets["gcp_service_account"]["auth_provider_x509_cert_url"],
-    "client_x509_cert_url": st.secrets["gcp_service_account"]["client_x509_cert_url"],
-    "universe_domain": st.secrets["gcp_service_account"]["universe_domain"],
-}
-
-credentials = service_account.Credentials.from_service_account_info(
-    credentials_info, scopes=["https://www.googleapis.com/auth/earthengine"]
-)
-
-ee.Initialize(credentials, project="ee-beaver-lab")
-
 # Initialize session state for questionnaire
 if "questionnaire_shown" not in st.session_state:
     st.session_state.questionnaire_shown = False
@@ -149,7 +131,7 @@ if not st.session_state.questionnaire_shown:
         """
     Thank you for being a beta tester for the Beaver Impacts web tool! We really value your input and appreciate you taking the time to fill out this form.
     
-    Please click [here](https://docs.google.com/forms/d/e/1FAIpQLSeE1GP7OptA4-z8Melz2AHxNsddtL9ZgJVXdVVtxLsrljJ10Q/viewform?usp=sharing) to start the survey. Continue on by clicking below: 
+    Please click [here](https://docs.google.com/forms/d/e/1FAIpQLSeE1GP7OptA4-z8Melz2AHxNsddtL9ZgJVXdVVtxLsrljJ10Q/viewform?usp=sharing) to start the survey. Continue on by clicking below:
     """
     )
 
