@@ -1,31 +1,16 @@
-import streamlit as st
-import streamlit.components.v1 as components
-import folium
-from streamlit_folium import st_folium
-from folium.plugins import Draw
-import matplotlib.pyplot as plt
-import geemap.foliumap as geemap
-from streamlit_folium import folium_static
-from scipy.stats import gaussian_kde
-from sklearn.metrics import roc_curve, auc, accuracy_score
-import ee 
-import os
-import numpy as np
-import pandas as pd
-# import gdal
-import tempfile
-import rasterio
+import ee
+
+from .constants import DEDUPLICATION_BUFFER_RADIUS
+
 
 def deduplicate_locations(orig_set):
     """Merge close points, take centroids, and return unique feature collection."""
-    bufferDistance = 10  # Adjust based on your criteria
-    bufferedPoints = orig_set.map(lambda point: point.buffer(bufferDistance))
+    bufferedPoints = orig_set.map(lambda point: point.buffer(DEDUPLICATION_BUFFER_RADIUS))
     unionOfBuffers = bufferedPoints.union()
-    simplifiedUnion = unionOfBuffers.geometry().simplify(bufferDistance / 2)
-    centroids = simplifiedUnion.geometries().map(
-        lambda geom: ee.Feature(ee.Geometry(geom).centroid())
-    )
+    simplifiedUnion = unionOfBuffers.geometry().simplify(DEDUPLICATION_BUFFER_RADIUS / 2)
+    centroids = simplifiedUnion.geometries().map(lambda geom: ee.Feature(ee.Geometry(geom).centroid()))
     return ee.FeatureCollection(centroids)
+
 
 def prepareHydro(waterway_fc):
     """
@@ -35,12 +20,13 @@ def prepareHydro(waterway_fc):
     # Paint the features onto an empty image
     base = ee.Image(0).int()
     hydroRaster = base.paint(waterway_fc, 1, 1)
-    
+
     # Focal max to fill small gaps (optional). Adjust radius/iterations as needed
     filledImage = hydroRaster.focal_max(radius=2, units="meters", iterations=8)
     hydroRaster = filledImage.gt(0).rename(["hydro_mask"])
-    
+
     return hydroRaster
+
 
 def sampleNegativePoints(positiveDams, hydroRaster, innerRadius, outerRadius, samplingScale):
     """
@@ -50,32 +36,27 @@ def sampleNegativePoints(positiveDams, hydroRaster, innerRadius, outerRadius, sa
       3) Taking the difference (outer minus inner).
       4) Sampling from hydroRaster within that ring, ensuring hydro_mask == 1.
     """
-    
+
     # Buffer each point by innerRadius with error margin
     innerBuffers = positiveDams.map(lambda pt: pt.buffer(innerRadius, 1))  # Add 1 meter error margin
     innerDissolved = innerBuffers.geometry().dissolve(1)  # Add 1 meter error margin
-    
+
     # Buffer the dissolved geometry by outerRadius with error margin
     outerBuffer = ee.Feature(innerDissolved.buffer(outerRadius, 1))  # Add 1 meter error margin
     # We want just the ring (outer minus inner)
     ringArea = outerBuffer.geometry().difference(innerDissolved, 1)  # Add 1 meter error margin
-    
+
     # Clip hydroRaster to that ring
     clippedHydro = hydroRaster.clip(ringArea)
-    
+
     # Sample the same number of negatives as positives
     numPoints = positiveDams.size()
-    
+
     # Use stratifiedSample, specifying classBand='hydro_mask'
     samples = clippedHydro.stratifiedSample(
-        numPoints=numPoints,
-        classBand='hydro_mask',
-        region=ringArea,
-        scale=samplingScale,
-        seed=42,
-        geometries=True
+        numPoints=numPoints, classBand="hydro_mask", region=ringArea, scale=samplingScale, seed=42, geometries=True
     )
-    
+
     # Filter only where hydro_mask == 1
-    negativePoints = samples.filter(ee.Filter.eq('hydro_mask', 1))
+    negativePoints = samples.filter(ee.Filter.eq("hydro_mask", 1))
     return negativePoints

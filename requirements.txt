@@ -115,3 +115,11 @@ wcwidth==0.2.13
 widgetsnbextension==4.0.13
 xyzservices==2025.1.0
 zipp==3.21.0
+
+# Code formatting and linting tools
+autoflake==2.2.1
+black==24.10.0
+flake8==7.1.1
+isort==5.13.2
+flake8-pyproject==1.2.3
+pre-commit==4.0.1
