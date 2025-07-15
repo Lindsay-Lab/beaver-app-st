@@ -1,5 +1,3 @@
-# import gdal
-
 import ee
 import streamlit as st
 from google.oauth2 import service_account
@@ -46,25 +44,6 @@ def set_id_negatives(feature_collection):
         return feature.set("id_property", ee.String("N").cat(idx.add(1).int().format()))
 
     return ee.FeatureCollection(indices.map(set_id))
-
-
-# def add_dam_buffer_and_standardize_date(feature):
-#     # Add Dam property and other metadata
-#     dam_status = feature.get("Dam")
-#     date = feature.get("date")
-#     formatted_date = ee.Date(date).format('YYYYMMdd')
-
-#     # Buffer geometry while retaining properties
-#     buffered_geometry = feature.geometry().buffer(buffer_radius)
-
-#     # Create a new feature with buffered geometry and updated properties
-#     return ee.Feature(buffered_geometry).set({
-#         "Dam": dam_status,
-#         "Survey_Date": ee.Date(date),
-#         "Damdate": ee.String("DamDate_").cat(formatted_date),
-#         "Point_geo": feature.geometry(),
-#         "id_property": feature.get("id_property")
-#     })
 
 
 def add_dam_buffer_and_standardize_date(feature):

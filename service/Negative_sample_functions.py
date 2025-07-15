@@ -1,5 +1,3 @@
-# import gdal
-
 import ee
 
 

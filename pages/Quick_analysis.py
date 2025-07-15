@@ -1,5 +1,3 @@
-# import gdal
-
 import ee
 import geemap.foliumap as geemap
 import matplotlib.pyplot as plt
@@ -57,13 +55,6 @@ if uploaded_file:
                 # Preview uploaded points
                 st.session_state.Positive_collection = feature_collection  # Save to session state
                 st.session_state["Full_positive"] = st.session_state.Positive_collection
-                # Positives_map = geemap.Map()
-                # Positives_map.add_basemap("SATELLITE")
-                # Positives_map.centerObject(st.session_state['Full_positive'])
-                # Positives_map.addLayer(st.session_state['Full_positive'],{'color': 'blue'},'Dams')
-
-                # st.write("Dam Locations (blue points):")
-                # Positives_map.to_streamlit(width=1200, height=700)
 
         except Exception as e:
             st.error(f"Error uploading data: {e}")
@@ -278,14 +269,12 @@ if st.session_state["Dam_data"]:
                 st.session_state.final_df = final_df
 
                 # Convert to DataFrame
-                # df_lst = geemap.ee_to_df(final_df)
                 final_df["Image_month"] = pd.to_numeric(final_df["Image_month"])
                 final_df["Image_year"] = pd.to_numeric(final_df["Image_year"])
                 final_df["Dam_status"] = final_df["Dam_status"].replace({"positive": "Dam", "negative": "Non-dam"})
 
                 # --- Produce some charts ---
                 # (Below is just your original logic; be sure to call st.pyplot(fig)!)
-                import seaborn as sns
 
                 fig, axes = plt.subplots(4, 1, figsize=(12, 18))
 
@@ -335,8 +324,6 @@ if st.session_state["Dam_data"]:
 
                 final_df = pd.concat(df_list)
                 st.session_state.final_df = final_df
-
-                import seaborn as sns
 
                 fig2, axes2 = plt.subplots(4, 1, figsize=(12, 20))
 

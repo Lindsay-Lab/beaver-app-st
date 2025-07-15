@@ -1,5 +1,3 @@
-# import gdal
-
 import ee
 import pandas as pd
 import streamlit as st
@@ -703,92 +701,6 @@ def add_landsat_lst(s2_image):
     lst_image = ee.Image(lst_image)
     # Add the LST band to the S2 image
     return s2_image.addBands(lst_image).set("size", collection_size)
-
-
-###### LST AND ET
-# def add_landsat_lst_et(s2_image):
-#     """Adds Landsat LST and OpenET data to a Sentinel-2 image."""
-
-#     year = ee.Number(s2_image.get('Image_year'))
-#     month = ee.Number(s2_image.get('Image_month'))
-#     start_date = ee.Date.fromYMD(year, month, 1)
-#     end_date = start_date.advance(1, 'month')
-
-#     # Ensure boxArea is valid; if None, use the image bounds
-#     boxArea = ee.Algorithms.If(
-#         s2_image.get('Area'),
-#         s2_image.get('Area'),
-#         s2_image.geometry()  # Use image geometry as fallback
-#     )
-
-#     ## **STEP 1: PROCESS LANDSAT DATA FOR LST**
-#     def apply_scale_factors(image):
-#         opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2)
-#         thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0)
-#         return image.addBands(opticalBands, overwrite=True).addBands(thermalBands, overwrite=True)
-
-#     def cloud_mask(image):
-#         cloudShadowBitmask = (1 << 3)
-#         cloudBitmask = (1 << 5)
-#         qa = image.select('QA_PIXEL')
-#         mask = qa.bitwiseAnd(cloudShadowBitmask).eq(0).And(
-#                qa.bitwiseAnd(cloudBitmask).eq(0))
-#         return image.updateMask(mask)
-
-#     # Build the Landsat collection
-#     landsat_col = (ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
-#                    .filterDate(start_date, end_date)
-#                    .filterBounds(boxArea)
-#                    .map(apply_scale_factors)
-#                    .map(cloud_mask))
-
-#     def add_ndvi_stats(img):
-#         # Compute NDVI
-#         ndvi = img.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
-
-#         # NDVI min/max
-#         ndvi_dict = ndvi.reduceRegion(
-#             reducer=ee.Reducer.minMax(),
-#             geometry=boxArea,
-#             scale=30,
-#             maxPixels=1e13
-#         )
-
-#         return img.setMulti(ndvi_dict)
-
-#     landsat_col = landsat_col.map(add_ndvi_stats)
-#     filtered_col = landsat_col.filter(ee.Filter.neq('NDVI_min', None))
-#     collection_size = filtered_col.size()
-
-#     empty_image = ee.Image.constant(0).rename(['LST']).clip(boxArea)
-
-#     lst_image = ee.Algorithms.If(
-#         collection_size.eq(0),
-#         empty_image,
-#         compute_lst(s2_image, filtered_col, boxArea)
-#     )
-#     lst_image = ee.Image(lst_image)
-
-#     ## **STEP 2: PROCESS ET DATA FROM OPENET**
-#     et_collection = (
-#         ee.ImageCollection("OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0")
-#         .filterDate(start_date, end_date)
-#         .filterBounds(boxArea)
-#     )
-
-#     # Compute the monthly ET mean for the given area
-#     et_monthly = et_collection.mean().select("et_ensemble_mad").rename("ET")
-
-#     # If ET data is missing, return an empty ET band
-#     et_final = ee.Algorithms.If(
-#         et_collection.size().eq(0),
-#         ee.Image.constant(0).rename("ET").clip(boxArea),  # Empty ET image
-#         et_monthly.clip(boxArea)
-#     )
-#     et_final = ee.Image(et_final)
-
-#     ## **STEP 3: ADD LST & ET TO THE SENTINEL-2 IMAGE**
-#     return s2_image.addBands(lst_image).addBands(et_final).set("size", collection_size)
 
 
 def add_landsat_lst_et(s2_image):

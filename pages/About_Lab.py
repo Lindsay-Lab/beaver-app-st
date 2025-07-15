@@ -56,5 +56,3 @@ We use the Google Earth Engine Python API under the hood to acess various data s
 ### If you want to re-run your analysis with changed dam locations or variables, please refresh the Analyze Impacts page.
 """
 )
-
-# st.balloons()
