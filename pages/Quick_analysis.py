@@ -5,6 +5,7 @@ import pandas as pd
 import seaborn as sns
 import streamlit as st
 
+from service.batch_processing import process_to_dataframe
 from service.constants import (
     DEFAULT_BATCH_SIZE,
     PLOT_FIGURE_HEIGHT_LARGE,
@@ -125,22 +126,9 @@ if "Positive_collection" in st.session_state:
                 Merged_collection = Positive_dam_id.merge(Neg_points_id)
                 st.session_state["Merged_collection"] = Merged_collection
 
-                def add_dam_buffer_and_standardize_date(feature):
-                    dam_status = feature.get("Dam")
-                    standardized_date = date  # forced date
-                    formatted_date = date.format("YYYYMMdd")
-                    buffered_geometry = feature.geometry().buffer(buffer_radius)
-                    return ee.Feature(buffered_geometry).set(
-                        {
-                            "Dam": dam_status,
-                            "Survey_Date": standardized_date,
-                            "Damdate": ee.String("DamDate_").cat(formatted_date),
-                            "Point_geo": feature.geometry(),
-                            "id_property": feature.get("id_property"),
-                        }
-                    )
-
-                Buffered_collection = Merged_collection.map(add_dam_buffer_and_standardize_date)
+                Buffered_collection = Merged_collection.map(
+                    lambda feature: add_dam_buffer_and_standardize_date(feature, buffer_radius, date)
+                )
                 Dam_data = Buffered_collection.select(["id_property", "Dam", "Survey_Date", "Damdate", "Point_geo"])
                 st.session_state["Dam_data"] = Dam_data
 
@@ -186,23 +174,18 @@ if st.session_state["Dam_data"]:
 
                 Dam_data = st.session_state["Dam_data"]
                 waterway_fc = st.session_state["Waterway"]
-                total_count = Dam_data.size().getInfo()
-                batch_size = DEFAULT_BATCH_SIZE
-                num_batches = (total_count + batch_size - 1) // batch_size
-                dam_list = Dam_data.toList(total_count)
-                df_list = []
 
-                progress_bar = st.progress(0)
-                for i in range(num_batches):
-                    batch = dam_list.slice(i * batch_size, min(total_count, (i + 1) * batch_size))
-                    dam_batch = ee.FeatureCollection(batch)
-                    S2_IC_batch = S2_Export_for_visual(dam_batch)
+                def process_batch(batch_collection):
+                    S2_IC_batch = S2_Export_for_visual(batch_collection)
                     results_batch = S2_IC_batch.map(add_landsat_lst_et).map(compute_all_metrics_LST_ET)
-                    df_batch = geemap.ee_to_df(ee.FeatureCollection(results_batch))
-                    df_list.append(df_batch)
-                    progress_bar.progress((i + 1) / num_batches)
+                    return ee.FeatureCollection(results_batch)
 
-                final_df = pd.concat(df_list)
+                final_df = process_to_dataframe(
+                    collection=Dam_data,
+                    processing_function=process_batch,
+                    batch_size=DEFAULT_BATCH_SIZE,
+                    progress_label="Processing visualization for all areas",
+                )
                 st.session_state.final_df = final_df
 
                 # Convert to DataFrame
@@ -243,23 +226,18 @@ if st.session_state["Dam_data"]:
             try:
                 Dam_data = st.session_state["Dam_data"]
                 waterway_fc = st.session_state["Waterway"]
-                total_count = Dam_data.size().getInfo()
-                batch_size = DEFAULT_BATCH_SIZE
-                num_batches = (total_count + batch_size - 1) // batch_size
-                dam_list = Dam_data.toList(total_count)
-                df_list = []
 
-                progress_bar = st.progress(0)
-                for i in range(num_batches):
-                    batch = dam_list.slice(i * batch_size, min(total_count, (i + 1) * batch_size))
-                    dam_batch = ee.FeatureCollection(batch)
-                    S2_IC_batch = S2_Export_for_visual_flowdir(dam_batch, waterway_fc)
+                def process_batch_with_flow(batch_collection):
+                    S2_IC_batch = S2_Export_for_visual_flowdir(batch_collection, waterway_fc)
                     results_batch = S2_IC_batch.map(add_landsat_lst_et).map(compute_all_metrics_up_downstream)
-                    df_batch = geemap.ee_to_df(ee.FeatureCollection(results_batch))
-                    df_list.append(df_batch)
-                    progress_bar.progress((i + 1) / num_batches)
+                    return ee.FeatureCollection(results_batch)
 
-                final_df = pd.concat(df_list)
+                final_df = process_to_dataframe(
+                    collection=Dam_data,
+                    processing_function=process_batch_with_flow,
+                    batch_size=DEFAULT_BATCH_SIZE,
+                    progress_label="Processing upstream/downstream analysis",
+                )
                 st.session_state.final_df = final_df
 
                 fig2, axes2 = plt.subplots(4, 1, figsize=(PLOT_FIGURE_WIDTH, PLOT_FIGURE_HEIGHT_LARGE))
