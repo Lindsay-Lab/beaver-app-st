@@ -1,12 +1,13 @@
 import ee
 
+from .constants import DEDUPLICATION_BUFFER_RADIUS
+
 
 def deduplicate_locations(orig_set):
     """Merge close points, take centroids, and return unique feature collection."""
-    bufferDistance = 10  # Adjust based on your criteria
-    bufferedPoints = orig_set.map(lambda point: point.buffer(bufferDistance))
+    bufferedPoints = orig_set.map(lambda point: point.buffer(DEDUPLICATION_BUFFER_RADIUS))
     unionOfBuffers = bufferedPoints.union()
-    simplifiedUnion = unionOfBuffers.geometry().simplify(bufferDistance / 2)
+    simplifiedUnion = unionOfBuffers.geometry().simplify(DEDUPLICATION_BUFFER_RADIUS / 2)
     centroids = simplifiedUnion.geometries().map(lambda geom: ee.Feature(ee.Geometry(geom).centroid()))
     return ee.FeatureCollection(centroids)
 

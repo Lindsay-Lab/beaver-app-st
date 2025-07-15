@@ -5,7 +5,13 @@ import pandas as pd
 import seaborn as sns
 import streamlit as st
 
-from service.constants import DEFAULT_BATCH_SIZE, STATE_ABBREVIATIONS
+from service.constants import (
+    DEFAULT_BATCH_SIZE,
+    PLOT_FIGURE_HEIGHT_LARGE,
+    PLOT_FIGURE_HEIGHT_SMALL,
+    PLOT_FIGURE_WIDTH,
+    STATE_ABBREVIATIONS,
+)
 from service.Data_management import add_dam_buffer_and_standardize_date
 from service.earth_engine_auth import initialize_earth_engine
 from service.Negative_sample_functions import deduplicate_locations, prepareHydro, sampleNegativePoints
@@ -207,7 +213,7 @@ if st.session_state["Dam_data"]:
                 # --- Produce some charts ---
                 # (Below is just your original logic; be sure to call st.pyplot(fig)!)
 
-                fig, axes = plt.subplots(4, 1, figsize=(12, 18))
+                fig, axes = plt.subplots(4, 1, figsize=(PLOT_FIGURE_WIDTH, PLOT_FIGURE_HEIGHT_SMALL))
 
                 metrics = ["NDVI", "NDWI_Green", "LST", "ET"]
                 titles = ["NDVI", "NDWI Green", "LST (°C)", "ET"]
@@ -256,7 +262,7 @@ if st.session_state["Dam_data"]:
                 final_df = pd.concat(df_list)
                 st.session_state.final_df = final_df
 
-                fig2, axes2 = plt.subplots(4, 1, figsize=(12, 20))
+                fig2, axes2 = plt.subplots(4, 1, figsize=(PLOT_FIGURE_WIDTH, PLOT_FIGURE_HEIGHT_LARGE))
 
                 def melt_and_plot(df, metric, ax):
                     up_col = f"{metric}_up"

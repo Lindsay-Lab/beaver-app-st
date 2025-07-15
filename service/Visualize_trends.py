@@ -2,6 +2,14 @@ import ee
 import pandas as pd
 import streamlit as st
 
+from .constants import (
+    ELEVATION_BUFFER_RADIUS,
+    LANDSAT_SCALE,
+    MAX_PIXELS_LARGE,
+    MAX_PIXELS_SMALL,
+    MIN_DISTANCE_FROM_DAMS,
+    SENTINEL2_SCALE,
+)
 from .earth_engine_auth import initialize_earth_engine
 
 initialize_earth_engine()
@@ -95,7 +103,7 @@ def S2_Export_for_visual(Dam_Collection):
             def calculate_cloud_coverage(image):
                 cloud = image.select("S2_Binary_cloudMask")
                 cloud_stats = cloud.reduceRegion(
-                    reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e9
+                    reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_SMALL
                 )
                 clear_coverage_percentage = ee.Number(cloud_stats.get("S2_Binary_cloudMask")).multiply(100).round()
                 cloud_coverage_percentage = ee.Number(100).subtract(clear_coverage_percentage)
@@ -192,7 +200,7 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             # buffered_geometry = boxArea.geometry()
             buffered_geometry = box.geometry()
             point_geom = buffered_geometry.centroid()
-            buffered_geometry = point_geom.buffer(200)
+            buffered_geometry = point_geom.buffer(MIN_DISTANCE_FROM_DAMS)
 
             waterway_state = filtered_waterway.filterBounds(buffered_geometry)
 
@@ -220,7 +228,7 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             def find_closest_flowline(point_geom, waterway=filtered_waterway):
                 # Filter to flowlines within some max distance bounding box
                 # (This helps avoid dealing with massive data.)
-                candidate_fc = waterway.filterBounds(point_geom.buffer(100))
+                candidate_fc = waterway.filterBounds(point_geom.buffer(ELEVATION_BUFFER_RADIUS))
 
                 # Compute distance from each flowline to the point:
                 candidate_fc_with_dist = candidate_fc.map(lambda f: f.set("dist", f.geometry().distance(point_geom)))
@@ -553,7 +561,9 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             cloud = image.select("S2_Binary_cloudMask")
 
             # Compute cloud coverage percentage using a simpler approach
-            cloud_stats = cloud.reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e9)
+            cloud_stats = cloud.reduceRegion(
+                reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_SMALL
+            )
 
             clear_coverage_percentage = ee.Number(cloud_stats.get("S2_Binary_cloudMask")).multiply(100).round()
             cloud_coverage_percentage = ee.Number(100).subtract(clear_coverage_percentage)  # Invert the percentage
@@ -602,7 +612,9 @@ def compute_lst(s2_image, landsat_col, boxArea):
     ndvi = median_img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
 
     # Compute NDVI min/max
-    ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=boxArea, scale=30, maxPixels=1e13)
+    ndvi_dict = ndvi.reduceRegion(
+        reducer=ee.Reducer.minMax(), geometry=boxArea, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
+    )
 
     ndvi_min = ee.Number(ee.Algorithms.If(ndvi_dict.contains("NDVI_min"), ndvi_dict.get("NDVI_min"), 0))
     ndvi_max = ee.Number(ee.Algorithms.If(ndvi_dict.contains("NDVI_max"), ndvi_dict.get("NDVI_max"), 0))
@@ -667,7 +679,9 @@ def add_landsat_lst(s2_image):
     # Compute NDVI stats on each image to ensure we only keep valid images
     def add_ndvi_stats(img):
         ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
-        ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=boxArea, scale=30, maxPixels=1e13)
+        ndvi_dict = ndvi.reduceRegion(
+            reducer=ee.Reducer.minMax(), geometry=boxArea, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
+        )
         return img.setMulti(ndvi_dict)
 
     landsat_col = landsat_col.map(add_ndvi_stats)
@@ -723,7 +737,9 @@ def add_landsat_lst_et(s2_image):
 
     def add_ndvi_stats(img):
         ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
-        ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=boxArea, scale=30, maxPixels=1e13)
+        ndvi_dict = ndvi.reduceRegion(
+            reducer=ee.Reducer.minMax(), geometry=boxArea, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
+        )
         return img.setMulti(ndvi_dict)
 
     # st.write("DEBUG: Adding NDVI stats")
@@ -738,7 +754,9 @@ def add_landsat_lst_et(s2_image):
             # st.write("DEBUG: Computing LST from single image")
             ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
             # st.write("DEBUG: Computing NDVI stats")
-            ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=boxArea, scale=30, maxPixels=1e13)
+            ndvi_dict = ndvi.reduceRegion(
+                reducer=ee.Reducer.minMax(), geometry=boxArea, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
+            )
 
             ndvi_min = ee.Number(ndvi_dict.get("NDVI_min"))
             ndvi_max = ee.Number(ndvi_dict.get("NDVI_max"))
@@ -820,17 +838,21 @@ def compute_all_metrics(image):
 
     # 2) Compute NDVI using Sentinel-2 Red & NIR
     ndvi = image.normalizedDifference(["S2_NIR", "S2_Red"]).rename("NDVI")
-    ndvi_mean = ndvi.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get("NDVI")
+    ndvi_mean = ndvi.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=geometry, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
+    ).get("NDVI")
 
     # 3) Compute NDWI_Green using Sentinel-2 Green & NIR
     ndwi_green = image.normalizedDifference(["S2_Green", "S2_NIR"]).rename("NDWI_Green")
-    ndwi_green_mean = ndwi_green.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get(
-        "NDWI_Green"
-    )
+    ndwi_green_mean = ndwi_green.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=geometry, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
+    ).get("NDWI_Green")
 
     # 4) Select LST band (added by add_landsat_lst)
     lst_band = image.select("LST")
-    lst_mean = lst_band.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get("LST")
+    lst_mean = lst_band.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=geometry, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
+    ).get("LST")
 
     # 5) Extract metadata (month, year, dam status, etc.)
     month = image.get("Image_month")
@@ -866,21 +888,27 @@ def compute_all_metrics_LST_ET(image):
 
     # 2) Compute NDVI using Sentinel-2 Red & NIR
     ndvi = image.normalizedDifference(["S2_NIR", "S2_Red"]).rename("NDVI")
-    ndvi_mean = ndvi.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get("NDVI")
+    ndvi_mean = ndvi.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=geometry, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
+    ).get("NDVI")
 
     # 3) Compute NDWI_Green using Sentinel-2 Green & NIR
     ndwi_green = image.normalizedDifference(["S2_Green", "S2_NIR"]).rename("NDWI_Green")
-    ndwi_green_mean = ndwi_green.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get(
-        "NDWI_Green"
-    )
+    ndwi_green_mean = ndwi_green.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=geometry, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
+    ).get("NDWI_Green")
 
     # 4) Select LST band (added by add_landsat_lst_et)
     lst_band = image.select("LST")
-    lst_mean = lst_band.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get("LST")
+    lst_mean = lst_band.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=geometry, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
+    ).get("LST")
 
     # 5) Select ET band (added by add_landsat_lst_et)
     et_band = image.select("ET")
-    et_mean = et_band.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get("ET")
+    et_mean = et_band.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=geometry, scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE
+    ).get("ET")
 
     # 6) Extract metadata (month, year, dam status, etc.)
     month = image.get("Image_month")
@@ -947,7 +975,7 @@ def compute_all_metrics_up_downstream(image):
 
     # Check if bands exist
     valid_up = upstream_mask.reduceRegion(
-        reducer=ee.Reducer.count(), geometry=image.geometry(), scale=10, maxPixels=1e13
+        reducer=ee.Reducer.count(), geometry=image.geometry(), scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_LARGE
     ).getNumber("upstream")
 
     # 2) Compute NDVI using Sentinel-2 Red & NIR
@@ -955,14 +983,14 @@ def compute_all_metrics_up_downstream(image):
 
     # Upstream NDVI
     ndvi_up_img = ndvi.updateMask(upstream_mask)
-    ndvi_up = ndvi_up_img.reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e13).get(
-        "NDVI"
-    )
+    ndvi_up = ndvi_up_img.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_LARGE
+    ).get("NDVI")
 
     # Downstream NDVI
     ndvi_down_img = ndvi.updateMask(downstream_mask)
     ndvi_down = ndvi_down_img.reduceRegion(
-        reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e13
+        reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_LARGE
     ).get("NDVI")
 
     # 3) Compute NDWI_Green using Sentinel-2 Green & NIR
@@ -970,27 +998,27 @@ def compute_all_metrics_up_downstream(image):
 
     # Upstream NDWI
     ndwi_up_img = ndwi_green.updateMask(upstream_mask)
-    ndwi_up = ndwi_up_img.reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e13).get(
-        "NDWI_Green"
-    )
+    ndwi_up = ndwi_up_img.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_LARGE
+    ).get("NDWI_Green")
 
     # Downstream NDWI
     ndwi_down_img = ndwi_green.updateMask(downstream_mask)
     ndwi_down = ndwi_down_img.reduceRegion(
-        reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e13
+        reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_LARGE
     ).get("NDWI_Green")
 
     # 4) LST band
     lst = image.select("LST")
     lst_up = (
         lst.updateMask(upstream_mask)
-        .reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=30, maxPixels=1e13)
+        .reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE)
         .get("LST")
     )
 
     lst_down = (
         lst.updateMask(downstream_mask)
-        .reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=30, maxPixels=1e13)
+        .reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE)
         .get("LST")
     )
 
@@ -998,13 +1026,13 @@ def compute_all_metrics_up_downstream(image):
     et = image.select("ET")
     et_up = (
         et.updateMask(upstream_mask)
-        .reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=30, maxPixels=1e13)
+        .reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE)
         .get("ET")
     )
 
     et_down = (
         et.updateMask(downstream_mask)
-        .reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=30, maxPixels=1e13)
+        .reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=LANDSAT_SCALE, maxPixels=MAX_PIXELS_LARGE)
         .get("ET")
     )
 

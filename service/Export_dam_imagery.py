@@ -1,5 +1,6 @@
 import ee
 
+from .constants import MAX_PIXELS_SMALL, SENTINEL2_SCALE
 from .earth_engine_auth import initialize_earth_engine
 
 initialize_earth_engine()
@@ -21,7 +22,7 @@ def S2_PixelExtraction_Export(Dam_Collection, S2, Hydro, selected_datasets):
             intersection_mask = image.select("S2_Red").neq(0).clip(boxArea)
             intersection_area = (
                 intersection_mask.multiply(ee.Image.pixelArea())
-                .reduceRegion(reducer=ee.Reducer.sum(), geometry=boxArea, scale=10, maxPixels=1e9)
+                .reduceRegion(reducer=ee.Reducer.sum(), geometry=boxArea, scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_SMALL)
                 .get("S2_Red")
             )
 
@@ -114,7 +115,9 @@ def S2_PixelExtraction_Export(Dam_Collection, S2, Hydro, selected_datasets):
 
         def calculate_cloud_coverage(image):
             cloud = image.select("S2_Binary_cloudMask")
-            cloud_stats = cloud.reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e9)
+            cloud_stats = cloud.reduceRegion(
+                reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_SMALL
+            )
             clear_coverage_percentage = ee.Number(cloud_stats.get("S2_Binary_cloudMask")).multiply(100).round()
             cloud_coverage_percentage = ee.Number(100).subtract(clear_coverage_percentage)
             return image.set("Cloud_coverage", cloud_coverage_percentage)
@@ -216,7 +219,9 @@ def Sentinel_Only_Export(Dam_Collection, S2):
 
         def calculate_cloud_coverage(image):
             cloud = image.select("S2_Binary_cloudMask")
-            cloud_stats = cloud.reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e9)
+            cloud_stats = cloud.reduceRegion(
+                reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=SENTINEL2_SCALE, maxPixels=MAX_PIXELS_SMALL
+            )
             clear_coverage_percentage = ee.Number(cloud_stats.get("S2_Binary_cloudMask")).multiply(100).round()
             cloud_coverage_percentage = ee.Number(100).subtract(clear_coverage_percentage)
             return image.set("Cloud_coverage", cloud_coverage_percentage)

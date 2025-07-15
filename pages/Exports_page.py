@@ -8,7 +8,15 @@ import pandas as pd
 import seaborn as sns
 import streamlit as st
 
-from service.constants import LARGE_BATCH_SIZE, STATE_ABBREVIATIONS
+from service.constants import (
+    LARGE_BATCH_SIZE,
+    MAP_HEIGHT,
+    MAP_WIDTH,
+    PLOT_FIGURE_HEIGHT_LARGE,
+    PLOT_FIGURE_HEIGHT_SMALL,
+    PLOT_FIGURE_WIDTH,
+    STATE_ABBREVIATIONS,
+)
 from service.earth_engine_auth import initialize_earth_engine
 from service.Negative_sample_functions import prepareHydro, sampleNegativePoints
 from service.Parser import upload_non_dam_points_to_ee, upload_points_to_ee
@@ -221,7 +229,7 @@ if st.session_state.questionnaire_shown:
                         Waterway_map.addLayer(st.session_state.selected_waterway, {"color": "blue"}, "Selected Waterway")
                         # Then add dam points layer
                         Waterway_map.addLayer(st.session_state["Full_positive"], {"color": "red"}, "Dams")
-                        Waterway_map.to_streamlit(width=1200, height=700)
+                        Waterway_map.to_streamlit(width=MAP_WIDTH, height=MAP_HEIGHT)
 
                         # Provide additional options
                         st.subheader("To use a different waterway map instead:")
@@ -319,7 +327,7 @@ if st.session_state.questionnaire_shown:
                                 validation_map = visualize_validation_results(
                                     st.session_state["Full_positive"], st.session_state["Waterway"], validation_results
                                 )
-                                validation_map.to_streamlit(width=1200, height=700)
+                                validation_map.to_streamlit(width=MAP_WIDTH, height=MAP_HEIGHT)
 
                         except Exception as e:
                             st.error(f"Error during validation: {str(e)}")
@@ -606,7 +614,7 @@ if st.session_state.questionnaire_shown:
                             Negative_points.addLayer(negativePoints, {"color": "red", "width": 2}, "Negative")
                             Negative_points.addLayer(Positive_dam_id, {"color": "blue"}, "Positive")
                             Negative_points.centerObject(Merged_collection)
-                            Negative_points.to_streamlit(width=1200, height=700)
+                            Negative_points.to_streamlit(width=MAP_WIDTH, height=MAP_HEIGHT)
 
                             # Set completion status
                             st.success("✅ Negative points generated successfully!")
@@ -794,7 +802,7 @@ if st.session_state.questionnaire_shown:
                                     {"positive": "Dam", "negative": "Non-dam"}
                                 )
 
-                                fig, axes = plt.subplots(4, 1, figsize=(12, 18))
+                                fig, axes = plt.subplots(4, 1, figsize=(PLOT_FIGURE_WIDTH, PLOT_FIGURE_HEIGHT_SMALL))
 
                                 metrics = ["NDVI", "NDWI_Green", "LST", "ET"]
                                 titles = ["NDVI", "NDWI Green", "LST (°C)", "ET"]
@@ -943,7 +951,7 @@ if st.session_state.questionnaire_shown:
                                     st.session_state.final_df = final_df
 
                                     # Create visualization
-                                    fig2, axes2 = plt.subplots(4, 1, figsize=(12, 20))
+                                    fig2, axes2 = plt.subplots(4, 1, figsize=(PLOT_FIGURE_WIDTH, PLOT_FIGURE_HEIGHT_LARGE))
 
                                     def melt_and_plot(df, metric, ax):
                                         melted = df.melt(

@@ -4,6 +4,8 @@ import ee
 import geemap.foliumap as geemap
 import streamlit as st
 
+from .constants import DEDUPLICATION_BUFFER_RADIUS
+
 
 def validate_dam_waterway_distance(
     dam_collection: ee.FeatureCollection, waterway_fc: ee.FeatureCollection, max_distance: float = 100
@@ -88,7 +90,7 @@ def check_waterway_intersection(dam_collection: ee.FeatureCollection, waterway_f
         def check_intersection(feature):
             point = feature.geometry()
             # Create a small buffer around the dam point (10 meters)
-            buffered_point = point.buffer(10)
+            buffered_point = point.buffer(DEDUPLICATION_BUFFER_RADIUS)
             # Check if the buffered point intersects with any waterways
             intersects = waterway_fc.filterBounds(buffered_point).size().gt(0)
             # Set intersection status and validation status
