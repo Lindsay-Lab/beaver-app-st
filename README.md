@@ -1,16 +1,150 @@
-# Beaver Impacts Tool: Developer Guide (Tentative)
+# Beaver Dam Environmental Impact Analysis Tool
 
-## Table of Contents
-1. [Architecture Overview](#architecture-overview)
-2. [Code Structure](#code-structure)
-3. [Key Components](#key-components)
-4. [Data Processing Pipeline](#data-processing-pipeline)
-5. [Earth Engine Integration](#earth-engine-integration)
-6. [Visualization Components](#visualization-components)
-7. [Adding New Features](#adding-new-features)
-8. [Common Issues and Debugging](#common-issues-and-debugging)
+A Streamlit-based web application for analyzing the environmental impacts of beaver dams using satellite imagery and geospatial analysis.
 
-## Architecture Overview
+## Quick Start
+
+### Prerequisites
+- Python 3.8 or higher
+- Google Earth Engine account with service credentials
+- Git
+
+### Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd beaver-app-st
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Set up Google Earth Engine credentials:**
+   - Create a service account in Google Cloud Console
+   - Download the service account key JSON file
+   - Configure Streamlit secrets (see Configuration section below)
+
+4. **Run the application:**
+   ```bash
+   streamlit run app.py
+   ```
+
+5. **Access the tool:**
+   - Open your browser to `http://localhost:8501`
+   - Follow the 6-step workflow in the main interface
+
+## Configuration
+
+### Google Earth Engine Setup
+
+Create a `.streamlit/secrets.toml` file in your project root:
+
+```toml
+[gcp_service_account]
+type = "service_account"
+project_id = "your-project-id"
+private_key_id = "your-private-key-id"
+private_key = "-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY_HERE\n-----END PRIVATE KEY-----\n"
+client_email = "your-service-account@your-project.iam.gserviceaccount.com"
+client_id = "your-client-id"
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project.iam.gserviceaccount.com"
+```
+
+**Important:** Never commit the secrets.toml file to version control.
+
+## Using the Tool
+
+### 6-Step Analysis Workflow
+
+1. **Upload Dam Locations**
+   - Upload CSV or GeoJSON files containing dam coordinates
+   - Required fields: latitude, longitude, date (YYYY-MM-DD format)
+
+2. **Select Waterway Data**
+   - Choose relevant waterway datasets for your study area
+   - Tool automatically filters by geographic bounds
+
+3. **Validate Dam Locations**
+   - Review dam locations for accuracy
+   - Check proximity to waterways
+   - Remove invalid points if necessary
+
+4. **Generate Non-Dam Locations**
+   - Upload existing non-dam points OR
+   - Auto-generate negative samples using spatial algorithms
+
+5. **Create Analysis Buffers**
+   - Set buffer radius (default: 150 meters)
+   - Apply elevation masking (±3 meters from dam elevation)
+
+6. **Analyze Environmental Metrics**
+   - Calculate NDVI (vegetation index)
+   - Calculate NDWI (water index)
+   - Calculate LST (land surface temperature)
+   - Calculate ET (evapotranspiration)
+   - Generate time series visualizations
+
+### Input Data Requirements
+
+**Dam Location Files:**
+- Format: CSV or GeoJSON
+- Required columns: `latitude`, `longitude`, `date`
+- Date format: YYYY-MM-DD
+- Coordinate system: WGS84 (EPSG:4326)
+
+**Example CSV format:**
+```csv
+latitude,longitude,date
+45.123,-122.456,2020-07-15
+45.234,-122.567,2020-08-20
+```
+
+## Output Data
+
+The tool generates:
+- **Time series plots:** Monthly environmental metrics over time
+- **Comparison analysis:** Dam vs non-dam areas
+- **Upstream/downstream analysis:** Flow direction impacts
+- **Exportable data:** CSV files with calculated metrics
+- **Interactive maps:** Visualizations of analysis areas
+
+## Metrics Calculated
+
+- **NDVI:** Normalized Difference Vegetation Index - measures vegetation health
+- **NDWI:** Normalized Difference Water Index - measures water content
+- **LST:** Land Surface Temperature - measures thermal conditions
+- **ET:** Evapotranspiration - measures water-energy exchange
+
+## Troubleshooting
+
+### Common Issues
+
+**"Memory limit exceeded" errors:**
+- Reduce batch size in processing
+- Use smaller study areas
+- Process data in smaller time windows
+
+**"No images found" errors:**
+- Check date ranges in input data
+- Verify geographic coordinates are valid
+- Ensure study area has satellite coverage
+
+**Authentication errors:**
+- Verify Google Earth Engine credentials
+- Check service account permissions
+- Ensure project is enabled for Earth Engine
+
+---
+
+## Developer Documentation
+
+### Architecture Overview
 
 The Beaver Impacts Tool is built on:
 - **Streamlit**: For the web interface
@@ -28,243 +162,78 @@ The application follows a step-by-step workflow where users:
 
 Each step involves interactions between the frontend (Streamlit) and backend processing using Earth Engine's Python API.
 
-## Code Structure
+### Code Structure
 
 ```
-beaver-impacts-tool/
+beaver-app-st/
+├── app.py                      # Main Streamlit application entry point
 ├── pages/                      # Streamlit pages
-│   ├── Exports_page.py         # Main analysis workflow
-│   └── [other pages...]        # Additional functionality
-├── service/                    # Core business logic
-│   ├── Sentinel2_functions.py  # Sentinel-2 image processing
-│   ├── Export_dam_imagery.py   # Image export functionality
-│   ├── Visualize_trends.py     # Visualization and metrics computation
+│   ├── About_Lab.py           # About page
+│   ├── Exports_page.py        # Main analysis workflow (primary functionality)
+│   └── Quick_analysis.py      # Quick analysis features
+├── service/                    # Core business logic modules
+│   ├── Data_management.py     # Data management utilities
+│   ├── Export_dam_imagery.py  # Image export functionality
 │   ├── Negative_sample_functions.py # Non-dam point generation
-│   ├── Parser.py               # Data parsing and input handling
-│   ├── Data_management.py      # Data management utilities
-│   └── Validation_service.py   # Validation logic
-├── assets/                     # Static assets
-├── app.py                      # Main application entry point
-├── README.md                   # This documentation
-└── requirements.txt            # Dependencies
+│   ├── Parser.py              # Data parsing and input handling
+│   ├── Sentinel2_functions.py # Sentinel-2 image processing
+│   ├── Validation_service.py  # Data validation logic
+│   ├── Visualize_trends.py    # Visualization and metrics computation
+│   ├── earth_engine_auth.py   # Earth Engine authentication
+│   ├── constants.py           # Centralized constants
+│   ├── batch_processing.py    # Batch processing utilities
+│   └── common_utilities.py    # Common utility functions
+├── assets/                     # Static assets and images
+└── requirements.txt           # Python dependencies
 ```
 
-## Key Components
+### Key Implementation Patterns
 
-### Earth Engine Authentication
+#### Earth Engine Authentication
+The application uses Google Earth Engine service account credentials stored in Streamlit secrets:
 ```python
 credentials_info = {
     "type": st.secrets["gcp_service_account"]["type"],
     "project_id": st.secrets["gcp_service_account"]["project_id"],
-    # Other credentials
+    # Other credentials from secrets
 }
-credentials = service_account.Credentials.from_service_account_info(
-    credentials_info,
-    scopes=["https://www.googleapis.com/auth/earthengine"]
-)
 ee.Initialize(credentials, project="ee-beaver-lab")
 ```
-This establishes the connection to Earth Engine using service account credentials.
 
-### Session State Management
+#### Session State Management
+Uses Streamlit's session state extensively to maintain application state across user interactions:
 ```python
-# Initialize session state variables
 if "Positive_collection" not in st.session_state:
     st.session_state.Positive_collection = None
-# More state variables...
-```
-The application uses Streamlit's session state to maintain state between user interactions.
-
-### Multi-step Workflow
-Each analysis step is implemented as an expandable section:
-```python
-with st.expander("Step 1: Upload Dam Locations", expanded=not st.session_state.step1_complete):
-    # Step 1 implementation
 ```
 
-## Data Processing Pipeline
-
-The application implements a complex data processing pipeline that transforms user inputs into actionable insights. The following six steps accurately reflect the actual code implementation:
-
-### 1. Point Data Processing and Standardization
-
-**Input**: CSV/GeoJSON files containing dam/non-dam locations
-**Processing**: 
-```python
-# Upload and standardize dam points
-feature_collection = upload_points_to_ee(uploaded_file, widget_prefix="Dam")
-feature_collection = feature_collection.map(set_id_year_property)
-
-# For non-dam points
-negative_points = sampleNegativePoints(positive_dams_fc, hydroRaster, innerRadius, outerRadius, samplingScale)
-negative_points = negative_points.map(set_id_negatives)
-```
-This function:
-1. Validates spatial data (coordinates)
-2. Standardizes date formats
-3. Assigns unique identifiers (P1, P2... for dams; N1, N2... for non-dams)
-4. Sets properties like dam status (positive/negative)
-
-**Output**: Earth Engine FeatureCollection with standardized points
-
-### 2. Buffer Creation and Elevation Masking
-
-**Input**: Standardized FeatureCollection of points
-**Processing**:
-```python
-Buffered_collection = Merged_collection.map(add_dam_buffer_and_standardize_date)
-```
-This function:
-1. Creates circular buffers (default: 150m radius)
-2. Applies elevation masking (±3m from point elevation)
-3. Preserves original point geometry as a property
-4. Sets date-related properties for time series analysis
-
-**Output**: FeatureCollection with polygon geometries (buffers) constrained by elevation
-
-### 3. Satellite Image Acquisition and Filtering
-
-**Input**: Buffered FeatureCollection
-**Processing**:
-```python
-# For combined analysis
-S2_cloud_mask_batch = ee.ImageCollection(S2_Export_for_visual(dam_batch_fc))
-
-# For upstream/downstream analysis
-S2_IC_batch = S2_Export_for_visual_flowdir(dam_batch_fc, waterway_fc)
-```
-This function:
-1. Determines time window (±6 months from survey date)
-2. Applies spatial filter (using buffer geometries)
-3. Applies cloud masking using QA bands
-4. Selects least cloudy image for each month (cloud coverage < 20%)
-5. Standardizes band names and properties
-
-**Output**: Earth Engine ImageCollection with filtered monthly Sentinel-2 imagery
-
-### 4. Advanced Metric Computation (LST and ET)
-
-**Input**: Sentinel-2 ImageCollection
-**Processing**:
-```python
-S2_with_LST_batch = S2_ImageCollection_batch.map(add_landsat_lst_et)
-```
-This function:
-1. Acquires synchronous Landsat 8 thermal data for each Sentinel-2 image
-2. Applies radiometric calibration to thermal bands
-3. Calculates Land Surface Temperature (LST) using NDVI-based emissivity
-4. Retrieves monthly evapotranspiration (ET) data from OpenET
-5. Handles edge cases using median values when multiple images exist
-6. Provides fallback values (99) when data is unavailable
-
-**Output**: Enhanced ImageCollection with LST and ET bands added
-
-### 5. Environmental Metrics Calculation
-
-**Input**: Enhanced ImageCollection with LST and ET
-**Processing**:
-```python
-# For combined analysis
-results_fc_lst_batch = S2_with_LST_batch.map(compute_all_metrics_LST_ET)
-
-# For upstream/downstream analysis
-results_batch = S2_with_LST_ET.map(compute_all_metrics_up_downstream)
-```
-This function calculates:
-1. NDVI (Normalized Difference Vegetation Index): (NIR-Red)/(NIR+Red)
-2. NDWI (Normalized Difference Water Index): (Green-NIR)/(Green+NIR)
-3. LST statistics (mean temperature in buffer area)
-4. ET statistics (mean evapotranspiration in buffer area)
-5. For upstream/downstream: calculates separate metrics for areas above and below dam points
-
-**Output**: FeatureCollection with calculated environmental metrics
-
-### 6. Data Processing and Visualization
-
-**Input**: FeatureCollection with calculated metrics
-**Processing**:
-```python
-# Convert to DataFrame
-df_batch = geemap.ee_to_df(results_fcc_lst_batch)
-df_list.append(df_batch)
-df_lst = pd.concat(df_list, ignore_index=True)
-
-# Data preparation
-df_lst['Image_month'] = pd.to_numeric(df_lst['Image_month'])
-df_lst['Image_year'] = pd.to_numeric(df_lst['Image_year'])
-df_lst['Dam_status'] = df_lst['Dam_status'].replace({'positive': 'Dam', 'negative': 'Non-dam'})
-
-# Visualization
-fig, axes = plt.subplots(4, 1, figsize=(12, 18))
-for ax, metric, title in zip(axes, metrics, titles):
-    sns.lineplot(data=df_lst, x="Image_month", y=metric, hue="Dam_status", style="Dam_status",
-                markers=True, dashes=False, ax=ax)
-```
-This function:
-1. Converts Earth Engine data to DataFrame format
-2. Standardizes data types (numeric months, years)
-3. Applies proper labeling for visualization
-4. Creates time series plots with confidence intervals (95% by default)
-5. Computes statistical significance between dam and non-dam areas
-6. Generates exportable visualizations and data tables
-
-**Output**: Interactive visualizations and downloadable CSV data
-
-## Earth Engine Integration
-
-The application extensively uses Google Earth Engine for geospatial analysis. Key integration points include:
-
-### Batch Processing
-
-One of the most critical patterns is batch processing to manage memory:
-
+#### Batch Processing Pattern
+Critical pattern for managing Earth Engine memory limits:
 ```python
 total_count = Dam_data.size().getInfo()
-batch_size = 10
+batch_size = 10  # Adjust based on data complexity
 num_batches = (total_count + batch_size - 1) // batch_size
 
 for i in range(num_batches):
-    # Get current batch
     dam_batch = Dam_data.toList(batch_size, i * batch_size)
     dam_batch_fc = ee.FeatureCollection(dam_batch)
-    
-    # Process batch
-    # ...
+    # Process batch...
 ```
 
-This pattern:
-1. Divides large collections into manageable batches
-2. Processes each batch independently
-3. Combines results after processing
+### Data Processing Pipeline
 
-### LST Calculation
+The application implements a 6-step workflow:
 
-The Land Surface Temperature calculation demonstrates complex Earth Engine operations:
+1. **Point Data Upload**: CSV/GeoJSON files with dam locations
+2. **Standardization**: Assigns unique IDs (P1, P2... for dams; N1, N2... for non-dams)
+3. **Buffer Creation**: Creates 150m radius buffers with elevation masking (±3m)
+4. **Satellite Image Acquisition**: Filters Sentinel-2 imagery with cloud masking
+5. **Metric Computation**: Calculates NDVI, NDWI, LST (Land Surface Temperature), and ET (Evapotranspiration)
+6. **Visualization**: Time series plots comparing dam vs non-dam areas
 
-```python
-def robust_compute_lst(filtered_col, boxArea):
-    # Compute NDVI
-    ndvi = img.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
-    
-    # Calculate vegetation fraction
-    fv = ndvi.subtract(ndvi_min).divide(ndvi_max.subtract(ndvi_min)).pow(2).rename('FV')
-    
-    # Calculate emissivity
-    em = fv.multiply(0.004).add(0.986).rename('EM')
-    
-    # Apply radiative transfer equation
-    lst = thermal.expression(
-        '(TB / (1 + (0.00115 * (TB / 1.438)) * log(em))) - 273.15',
-        {'TB': thermal, 'em': em}
-    ).rename('LST')
-    
-    return lst
-```
+### Earth Engine Integration
 
-### Cloud Masking
-
-Cloud masking is essential for reliable analysis:
-
+#### Cloud Masking
 ```python
 def cloud_mask(image):
     qa = image.select('QA_PIXEL')
@@ -273,40 +242,29 @@ def cloud_mask(image):
     return image.updateMask(mask)
 ```
 
-## Visualization Components
-
-The application creates several visualization types:
-
-### Time Series Plots
-
+#### LST Calculation
+Complex Land Surface Temperature calculation using NDVI-based emissivity:
 ```python
-fig, axes = plt.subplots(4, 1, figsize=(12, 18))
-metrics = ['NDVI', 'NDWI_Green', 'LST', 'ET']
-titles = ['NDVI', 'NDWI Green', 'LST (°C)', 'ET']
-
-for ax, metric, title in zip(axes, metrics, titles):
-    sns.lineplot(data=df_lst, x="Image_month", y=metric, hue="Dam_status", 
-                style="Dam_status", markers=True, dashes=False, ax=ax)
-    ax.set_title(f'{title} by Month', fontsize=14)
-    ax.set_xticks(range(1, 13))
+def robust_compute_lst(filtered_col, boxArea):
+    ndvi = img.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
+    fv = ndvi.subtract(ndvi_min).divide(ndvi_max.subtract(ndvi_min)).pow(2)
+    em = fv.multiply(0.004).add(0.986).rename('EM')
+    lst = thermal.expression(
+        '(TB / (1 + (0.00115 * (TB / 1.438)) * log(em))) - 273.15',
+        {'TB': thermal, 'em': em}
+    )
+    return lst
 ```
 
-### Upstream vs. Downstream Analysis
+### Development Notes
 
-```python
-def melt_and_plot(df, metric, ax):
-    melted = df.melt(['Image_year','Image_month','Dam_status'], 
-                  [f"{metric}_up", f"{metric}_down"], 
-                  'Flow', metric)
-    melted['Flow'].replace({f"{metric}_up":'Upstream', 
-                         f"{metric}_down":'Downstream'}, 
-                        inplace=True)
-    sns.lineplot(data=melted, x='Image_month', y=metric, 
-              hue='Dam_status', style='Flow', 
-              markers=True, ax=ax)
-```
+- **Memory Management**: Always use batch processing for large datasets to avoid Earth Engine memory limits
+- **Error Handling**: Implement try-catch blocks around Earth Engine operations
+- **Data Validation**: Validate coordinate formats and date ranges before processing
+- **Cloud Coverage**: Use cloud masking and select least cloudy images (< 20% cloud coverage)
+- **Authentication**: Ensure Earth Engine credentials are properly configured in Streamlit secrets
 
-## Adding New Features
+### Adding New Features
 
 To add new features to the application:
 
@@ -325,53 +283,12 @@ To add new features to the application:
    - Add processing code for the new metric
    - Update visualization code to include the new metric
 
-## Common Issues and Debugging
+### Dependencies
 
-### Memory Management
-
-The most common issue is memory limits in Earth Engine:
-
-```python
-# Use batch processing
-total_count = Dam_data.size().getInfo()
-batch_size = 10  # Adjust this value based on data complexity
-num_batches = (total_count + batch_size - 1) // batch_size
-
-for i in range(num_batches):
-    # Process in batches
-    dam_batch = Dam_data.toList(batch_size, i * batch_size)
-    # ...
-```
-
-### Error Handling
-
-Always implement proper error handling:
-
-```python
-try:
-    # Process data
-    # ...
-except Exception as e:
-    st.warning(f"Error processing batch {i+1}: {e}")
-    # Continue with next batch
-    continue
-```
-
-### Dealing with Cloud Coverage
-
-Use cloud masking and select least cloudy images:
-
-```python
-def get_monthly_least_cloudy_images(Collection):
-    months = ee.List.sequence(1, 12)
-    def get_month_image(month):
-        monthly_images = Collection.filter(
-            ee.Filter.calendarRange(month, month, 'month'))
-        return ee.Image(monthly_images.sort('Cloud_coverage').first())
-    
-    monthly_images_list = months.map(get_month_image)
-    return ee.ImageCollection.fromImages(monthly_images_list)
-```
-
-
-Happy coding!
+This is a Python application using Earth Engine Python API. Main dependencies include:
+- `streamlit`: Web framework
+- `earthengine-api`: Google Earth Engine Python API
+- `geemap`: Earth Engine integration tools
+- `pandas`, `numpy`: Data manipulation
+- `matplotlib`, `seaborn`: Visualization
+- `folium`: Interactive maps
