@@ -2,7 +2,8 @@ import streamlit as st
 
 st.title("About the Beaver Lab")
 
-st.markdown('''
+st.markdown(
+    """
 # Welcome to the Beaver Impacts Tool
 
 The Beaver Impacts Tool is a web app developed by the Beaver Lab at [Collaborative Earth](https://www.collaborative.earth/) to help land managers and researchers understand the impact of beavers and beaver-based restoration on their land.
@@ -53,6 +54,5 @@ We use the Google Earth Engine Python API under the hood to acess various data s
 
 
 ### If you want to re-run your analysis with changed dam locations or variables, please refresh the Analyze Impacts page.
-''')
-
-#st.balloons()
+"""
+)
