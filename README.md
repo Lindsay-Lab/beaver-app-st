@@ -31,6 +31,23 @@ earthengine authenticate
 ```
 This will open a page in your browser for you to confirm Google permissions to allow your account to use Google Earth Engine.
 
+Create a project in Google Cloud:
+1. Go to https://console.cloud.google.com/
+2. Create a new project and make a note of the project id (which can be different from the name)
+
+Copy config.yaml.example to config.yaml
+```commandline
+cp config.yaml.example config.yaml
+```
+Add your project id to the `config.yaml` file.
+
+Enable the Earth Engine API for your project:
+1. Go to https://console.cloud.google.com/apis/library/earthengine.googleapis.com
+2. Select your project and click "Enable".
+
+Register your project ID with Earth Engine:
+https://code.earthengine.google.com/register?project=your-gcp-project-id
+
 Running streamlit app locally:
 ```commandline
 streamlit run app.py
