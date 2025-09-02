@@ -807,55 +807,9 @@ def add_landsat_lst_et(s2_image):
     return s2_image.addBands(lst_image).addBands(et_final).set("landsat_collection_size", collection_size)
 
 
-########### Functions to calculate means
-##### NDVI, LST
-def compute_all_metrics(image):
-    """
-    Returns an ee.Feature containing mean NDVI, NDWI_Green, and LST
-    for the geometry of interest.
-    """
-    # 1) Use the 'elevation' band (or any other reference band) to get geometry
-    elevation_mask = image.select("elevation")
-    geometry = elevation_mask.geometry()
-
-    # 2) Compute NDVI using Sentinel-2 Red & NIR
-    ndvi = image.normalizedDifference(["S2_NIR", "S2_Red"]).rename("NDVI")
-    ndvi_mean = ndvi.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get("NDVI")
-
-    # 3) Compute NDWI_Green using Sentinel-2 Green & NIR
-    ndwi_green = image.normalizedDifference(["S2_Green", "S2_NIR"]).rename("NDWI_Green")
-    ndwi_green_mean = ndwi_green.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get(
-        "NDWI_Green"
-    )
-
-    # 4) Select LST band (added by add_landsat_lst)
-    lst_band = image.select("LST")
-    lst_mean = lst_band.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get("LST")
-
-    # 5) Extract metadata (month, year, dam status, etc.)
-    month = image.get("Image_month")
-    status = image.get("Dam_status")
-    year = image.get("Image_year")
-
-    # Combine all metrics & metadata into a dictionary
-    combined_metrics = ee.Dictionary(
-        {
-            "NDVI": ndvi_mean,
-            "NDWI_Green": ndwi_green_mean,
-            "LST": lst_mean,
-            "Image_month": month,
-            "Image_year": year,
-            "Dam_status": status,
-        }
-    )
-
-    # Return as an ee.Feature
-    return ee.Feature(None, combined_metrics)
-
-
 ####### Compute ET and include upstream and downstream
 ##### NDVI, LST, ET
-def compute_all_metrics_LST_ET(image):
+def compute_all_metrics_LST_ET(image) -> ee.Feature:
     """
     Returns an ee.Feature containing mean NDVI, NDWI_Green, LST, and ET
     for the geometry of interest.
@@ -902,39 +856,7 @@ def compute_all_metrics_LST_ET(image):
         }
     )
 
-    # Return as an ee.Feature
     return ee.Feature(None, combined_metrics)
-
-
-###### Upstream and downstream
-def extract_coordinates_df(dam_data):
-    """
-    Extract coordinates from dam data and return a DataFrame with id_property and coordinates.
-    """
-    try:
-        # Extract features from dam_data
-        features = dam_data.getInfo()["features"]
-
-        # Create a list to store coordinates
-        coords_data = []
-
-        for feature in features:
-            properties = feature["properties"]
-            id_property = properties.get("id_property")
-            point_geo = properties.get("Point_geo")
-
-            if point_geo:
-                # Extract coordinates from Point_geo
-                coords = point_geo["coordinates"]
-                coords_data.append({"id_property": id_property, "longitude": coords[0], "latitude": coords[1]})
-
-        # Convert to DataFrame
-        coords_df = pd.DataFrame(coords_data)
-        return coords_df
-
-    except Exception as e:
-        st.warning(f"Error extracting coordinates: {str(e)}")
-        return pd.DataFrame(columns=["id_property", "longitude", "latitude"])
 
 
 def compute_all_metrics_up_downstream(image):

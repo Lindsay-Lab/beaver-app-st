@@ -1,7 +1,6 @@
 import csv
 import json
 
-import dateutil
 import ee
 import pandas as pd
 import streamlit as st
@@ -9,28 +8,6 @@ import streamlit as st
 from .earth_engine_auth import initialize_earth_engine
 
 initialize_earth_engine()
-
-
-def set_id_year_property(feature):
-    try:
-        # Ensure feature has an ID; default to "unknown" if not present
-        feature_id = feature.id() if feature.id() else "unknown"
-
-        # Convert Earth Engine String to Python string for processing
-        feature_id = feature_id.getInfo() if isinstance(feature_id, ee.ComputedObject) else feature_id
-
-        # Extract the last two characters safely
-        short_id = feature_id[-2:] if isinstance(feature_id, str) and len(feature_id) >= 2 else "NA"
-
-        # Safely get the year from the date property
-        date = feature.get("date")
-        year = ee.Date(date).get("year").getInfo() if date else None
-
-        # Add the new properties
-        return feature.set("id_property", feature_id).set("year", year).set("DamID", short_id)
-    except Exception as e:
-        st.error(f"An error occurred during standardization: {e}")
-        return feature  # Return the original feature if an error occurs
 
 
 # TODO: Add a function to easily upload points to Earth Engine
@@ -45,19 +22,6 @@ def clean_coordinate(value):
         return float(value)
     except ValueError:
         return None  # Return None if the value cannot be converted
-
-
-def parse_date(value, date_format):
-    """Parses a date value into a standardized YYYY-MM-DD format."""
-    try:
-        if date_format == "Auto Detect":
-            return dateutil.parser.parse(str(value)).strftime("%Y-%m-%d")
-        elif date_format == "Unix Timestamp":
-            return pd.to_datetime(int(value), unit="s").strftime("%Y-%m-%d")
-        else:
-            return pd.to_datetime(value, format=date_format).strftime("%Y-%m-%d")
-    except Exception:
-        return None  # Return None if the date cannot be parsed
 
 
 # Modified parser to include widgit_prefix and autodetect header
