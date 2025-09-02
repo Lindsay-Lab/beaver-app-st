@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.title("About the Beaver Lab")
+# st.title("About the Beaver Lab")
 
 st.markdown('''
 # Welcome to the Beaver Impacts Tool
