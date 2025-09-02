@@ -149,7 +149,9 @@ if st.session_state.questionnaire_shown:
     # Create expandable sections for each step
     with st.expander("Step 1: Upload Dam Locations", expanded=not st.session_state.step1_complete):
         st.header("Step 1: Upload Dam Locations")
-        uploaded_file = st.file_uploader("Choose a CSV or GeoJSON file", type=["csv", "geojson"], key="Dam_file_uploader")
+        uploaded_file = st.file_uploader(
+            "Choose a CSV or GeoJSON file", type=["csv", "geojson"], key="Dam_file_uploader"
+        )
         if uploaded_file:
             with st.spinner("Processing uploaded file..."):
                 try:
@@ -269,7 +271,9 @@ if st.session_state.questionnaire_shown:
                         Waterway_map.add_basemap("SATELLITE")
                         Waterway_map.centerObject(st.session_state["Full_positive"])
                         # Add waterway layer first
-                        Waterway_map.addLayer(st.session_state.selected_waterway, {"color": "blue"}, "Selected Waterway")
+                        Waterway_map.addLayer(
+                            st.session_state.selected_waterway, {"color": "blue"}, "Selected Waterway"
+                        )
                         # Then add dam points layer
                         Waterway_map.addLayer(st.session_state["Full_positive"], {"color": "red"}, "Dams")
                         Waterway_map.to_streamlit(width=1200, height=700)
@@ -317,7 +321,8 @@ if st.session_state.questionnaire_shown:
             st.error("Please complete Step 1 first.")
 
     with st.expander(
-        "Step 3: Validate Dam Locations", expanded=st.session_state.step2_complete and not st.session_state.step3_complete
+        "Step 3: Validate Dam Locations",
+        expanded=st.session_state.step2_complete and not st.session_state.step3_complete,
     ):
         st.header("Step 3: Validate Dam Locations")
 
@@ -325,7 +330,11 @@ if st.session_state.questionnaire_shown:
         if not st.session_state.validation_complete:
             # Add validation parameters
             max_distance = st.number_input(
-                "Maximum allowed distance from waterway (meters):", min_value=0, value=50, step=10, key="max_distance_input"
+                "Maximum allowed distance from waterway (meters):",
+                min_value=0,
+                value=50,
+                step=10,
+                key="max_distance_input",
             )
 
             # Validate positive dams
@@ -499,9 +508,9 @@ if st.session_state.questionnaire_shown:
                                         # Get date from the first positive sample
                                         first_pos = st.session_state.Positive_collection.first()
                                         date = first_pos.get("date")
-                                    return feature.set("id_property", ee.String("P").cat(idx.add(1).int().format())).set(
-                                        "date", date
-                                    )
+                                    return feature.set(
+                                        "id_property", ee.String("P").cat(idx.add(1).int().format())
+                                    ).set("date", date)
 
                                 Positive_dam_id = ee.FeatureCollection(pos_indices.map(set_id_positives))
 
@@ -624,7 +633,9 @@ if st.session_state.questionnaire_shown:
                             def set_id_negatives2(idx):
                                 idx = ee.Number(idx)
                                 feature = ee.Feature(features_list.get(idx))
-                                labeled_feature = feature.set("id_property", ee.String("N").cat(idx.add(1).int().format()))
+                                labeled_feature = feature.set(
+                                    "id_property", ee.String("N").cat(idx.add(1).int().format())
+                                )
                                 return labeled_feature
 
                             Neg_points_id = ee.FeatureCollection(indices.map(set_id_negatives2))
@@ -643,7 +654,9 @@ if st.session_state.questionnaire_shown:
                             def set_id_positives(idx):
                                 idx = ee.Number(idx)
                                 feature = ee.Feature(pos_features_list.get(idx))
-                                labeled_feature = feature.set("id_property", ee.String("P").cat(idx.add(1).int().format()))
+                                labeled_feature = feature.set(
+                                    "id_property", ee.String("P").cat(idx.add(1).int().format())
+                                )
                                 return labeled_feature
 
                             Positive_dam_id = ee.FeatureCollection(pos_indices.map(set_id_positives))
@@ -731,10 +744,14 @@ if st.session_state.questionnaire_shown:
                             )
 
                         # Create buffers
-                        Buffered_collection = st.session_state.Merged_collection.map(add_dam_buffer_and_standardize_date)
+                        Buffered_collection = st.session_state.Merged_collection.map(
+                            add_dam_buffer_and_standardize_date
+                        )
 
                         # Select relevant properties
-                        Dam_data = Buffered_collection.select(["id_property", "Dam", "Survey_Date", "Damdate", "Point_geo"])
+                        Dam_data = Buffered_collection.select(
+                            ["id_property", "Dam", "Survey_Date", "Damdate", "Point_geo"]
+                        )
 
                         # Save to session state
                         st.session_state.Dam_data = Dam_data

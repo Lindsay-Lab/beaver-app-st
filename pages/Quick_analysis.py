@@ -142,7 +142,9 @@ if "Positive_collection" in st.session_state:
 
                 # Sample negative points
                 negativePoints = sampleNegativePoints(positive_dams_fc, hydroRaster, innerRadius, outerRadius, 10)
-                negativePoints = negativePoints.map(lambda feature: feature.set("Dam", "negative").set("date", full_date))
+                negativePoints = negativePoints.map(
+                    lambda feature: feature.set("Dam", "negative").set("date", full_date)
+                )
 
                 fc = negativePoints
                 features_list = fc.toList(fc.size())
@@ -155,7 +157,9 @@ if "Positive_collection" in st.session_state:
 
                 Neg_points_id = ee.FeatureCollection(indices.map(set_id_negatives2))
 
-                Pos_collection = st.session_state.Positive_collection.map(lambda feature: feature.set("Dam", "positive"))
+                Pos_collection = st.session_state.Positive_collection.map(
+                    lambda feature: feature.set("Dam", "positive")
+                )
 
                 pos_features_list = Pos_collection.toList(Pos_collection.size())
                 pos_indices = ee.List.sequence(0, Pos_collection.size().subtract(1))
