@@ -10,10 +10,6 @@ from .earth_engine_auth import initialize_earth_engine
 initialize_earth_engine()
 
 
-# TODO: Add a function to easily upload points to Earth Engine
-# The format is slightly different in Jupyter notebook because it doesn't deal with streamlit syntax
-
-
 def clean_coordinate(value):
     """Cleans and converts a coordinate value into a valid float."""
     try:
