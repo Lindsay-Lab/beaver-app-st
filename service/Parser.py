@@ -1,5 +1,6 @@
 import csv
 import json
+from io import StringIO
 
 import ee
 import pandas as pd
@@ -20,8 +21,10 @@ def clean_coordinate(value):
         return None  # Return None if the value cannot be converted
 
 
-# Modified parser to include widgit_prefix and autodetect header
-def upload_points_to_ee(file, widget_prefix=""):
+def upload_points_to_ee(file: StringIO, widget_prefix:str="") -> ee.FeatureCollection | None:
+    """
+    Modified parser to include widget_prefix and autodetect header
+    """
     if not file:
         return None
 
