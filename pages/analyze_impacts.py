@@ -8,122 +8,29 @@ import pandas as pd
 import seaborn as sns
 import streamlit as st
 
+from service.constants import AppConstants
 from service.earth_engine_auth import initialize_earth_engine
-from service.Negative_sample_functions import prepareHydro, sampleNegativePoints
-from service.Parser import upload_non_dam_points_to_ee, upload_points_to_ee
-from service.Validation_service import (
+from service.load_datasets import load_nhd_collections
+from service.negative_sampling import prepare_hydro, sample_negative_points
+from service.parser import extract_coordinates_df, upload_non_dam_points_to_ee, upload_points_to_ee
+from service.session_state import SessionStateManager
+from service.validation import (
     check_waterway_intersection,
     generate_validation_report,
     validate_dam_waterway_distance,
     visualize_validation_results,
 )
-from service.Visualize_trends import (
-    S2_Export_for_visual,
-    S2_Export_for_visual_flowdir,
+from service.visualize_trends import (
+    s2_export_for_visual,
+    s2_export_for_visual_flowdir,
     add_landsat_lst_et,
-    compute_all_metrics_LST_ET,
+    compute_all_metrics_lst_et,
     compute_all_metrics_up_downstream,
 )
 
 initialize_earth_engine()
+SessionStateManager.initialize()
 
-
-def extract_coordinates_df(dam_data):
-    """
-    Extract coordinates from Dam_data and create a DataFrame with id_property and coordinates
-
-    Args:
-        dam_data: Earth Engine Feature Collection containing dam data
-
-    Returns:
-        DataFrame with id_property, longitude, and latitude columns
-    """
-    try:
-        # Get features from Dam_data
-        dam_features = dam_data.getInfo()["features"]
-
-        coords_data = []
-        for i, feature in enumerate(dam_features):
-            try:
-                props = feature["properties"]
-                id_prop = props.get("id_property")
-
-                if not id_prop:
-                    st.warning(f"Feature {i} missing id_property")
-                    continue
-
-                # Extract coordinates from Point_geo
-                if "Point_geo" in props:
-                    point_geo = props["Point_geo"]
-
-                    if isinstance(point_geo, dict) and "coordinates" in point_geo:
-                        coords = point_geo["coordinates"]
-                        if isinstance(coords, list) and len(coords) >= 2:
-                            coords_data.append({"id_property": id_prop, "longitude": coords[0], "latitude": coords[1]})
-                        else:
-                            st.warning(f"Invalid coordinates format for feature {i}: {coords}")
-                    else:
-                        st.warning(f"Point_geo missing coordinates for feature {i}")
-                else:
-                    st.warning(f"No Point_geo found for feature {i}")
-
-            except Exception as e:
-                st.warning(f"Error processing feature {i}: {str(e)}")
-                continue
-
-        # Create DataFrame from coordinates data
-        coords_df = pd.DataFrame(coords_data)
-
-        return coords_df
-    except Exception as e:
-        st.warning(f"Could not extract coordinates: {str(e)}")
-        return pd.DataFrame(columns=["id_property", "longitude", "latitude"])
-
-
-# Initialize session state for questionnaire
-if "questionnaire_shown" not in st.session_state:
-    st.session_state.questionnaire_shown = False
-if "survey_clicked" not in st.session_state:
-    st.session_state.survey_clicked = False
-
-# Initialize session state variables
-if "Positive_collection" not in st.session_state:
-    st.session_state.Positive_collection = None
-if "buffer_radius" not in st.session_state:
-    st.session_state.buffer_radius = 150  # Default buffer radius
-if "validation_complete" not in st.session_state:
-    st.session_state.validation_complete = False
-if "use_all_dams" not in st.session_state:
-    st.session_state.use_all_dams = True
-if "validation_step" not in st.session_state:
-    st.session_state.validation_step = "initial"
-if "show_non_dam_section" not in st.session_state:
-    st.session_state.show_non_dam_section = False
-if "buffer_complete" not in st.session_state:
-    st.session_state.buffer_complete = False
-if "Dam_data" not in st.session_state:
-    st.session_state.Dam_data = None
-if "Full_positive" not in st.session_state:
-    st.session_state.Full_positive = None
-if "selected_waterway" not in st.session_state:
-    st.session_state.selected_waterway = None
-if "dataset_loaded" not in st.session_state:
-    st.session_state.dataset_loaded = False
-if "validation_results" not in st.session_state:
-    st.session_state.validation_results = None
-if "buffers_created" not in st.session_state:
-    st.session_state.buffers_created = False
-if "Merged_collection" not in st.session_state:
-    st.session_state.Merged_collection = None
-if "visualization_complete" not in st.session_state:
-    st.session_state.visualization_complete = False
-if "df_lst" not in st.session_state:
-    st.session_state.df_lst = None
-if "fig" not in st.session_state:
-    st.session_state.fig = None
-for i in range(1, 7):
-    if f"step{i}_complete" not in st.session_state:
-        st.session_state[f"step{i}_complete"] = False
 
 if not st.session_state.questionnaire_shown:
     st.title("Beaver Impacts Feedback Survey")
@@ -149,7 +56,9 @@ if st.session_state.questionnaire_shown:
     # Create expandable sections for each step
     with st.expander("Step 1: Upload Dam Locations", expanded=not st.session_state.step1_complete):
         st.header("Step 1: Upload Dam Locations")
-        uploaded_file = st.file_uploader("Choose a CSV or GeoJSON file", type=["csv", "geojson"], key="Dam_file_uploader")
+        uploaded_file = st.file_uploader(
+            "Choose a CSV or GeoJSON file", type=["csv", "geojson"], key="Dam_file_uploader"
+        )
         if uploaded_file:
             with st.spinner("Processing uploaded file..."):
                 try:
@@ -166,7 +75,7 @@ if st.session_state.questionnaire_shown:
                         preview_map.add_basemap("SATELLITE")
                         preview_map.addLayer(feature_collection, {"color": "blue"}, "Dam Locations")
                         preview_map.centerObject(feature_collection)
-                        preview_map.to_streamlit(width=800, height=600)
+                        preview_map.to_streamlit(width=AppConstants.MAP_WIDTH, height=AppConstants.MAP_HEIGHT)
                 except Exception as e:
                     st.error(f"Error processing file: {str(e)}")
 
@@ -194,68 +103,7 @@ if st.session_state.questionnaire_shown:
                 else:
                     st.write(f"States within dam data bounds: {state_names}")
 
-                    # Automatically load NHD dataset
-                    state_initials = {
-                        "Alabama": "AL",
-                        "Alaska": "AK",
-                        "Arizona": "AZ",
-                        "Arkansas": "AR",
-                        "California": "CA",
-                        "Colorado": "CO",
-                        "Connecticut": "CT",
-                        "Delaware": "DE",
-                        "Florida": "FL",
-                        "Georgia": "GA",
-                        "Hawaii": "HI",
-                        "Idaho": "ID",
-                        "Illinois": "IL",
-                        "Indiana": "IN",
-                        "Iowa": "IA",
-                        "Kansas": "KS",
-                        "Kentucky": "KY",
-                        "Louisiana": "LA",
-                        "Maine": "ME",
-                        "Maryland": "MD",
-                        "Massachusetts": "MA",
-                        "Michigan": "MI",
-                        "Minnesota": "MN",
-                        "Mississippi": "MS",
-                        "Missouri": "MO",
-                        "Montana": "MT",
-                        "Nebraska": "NE",
-                        "Nevada": "NV",
-                        "New Hampshire": "NH",
-                        "New Jersey": "NJ",
-                        "New Mexico": "NM",
-                        "New York": "NY",
-                        "North Carolina": "NC",
-                        "North Dakota": "ND",
-                        "Ohio": "OH",
-                        "Oklahoma": "OK",
-                        "Oregon": "OR",
-                        "Pennsylvania": "PA",
-                        "Rhode Island": "RI",
-                        "South Carolina": "SC",
-                        "South Dakota": "SD",
-                        "Tennessee": "TN",
-                        "Texas": "TX",
-                        "Utah": "UT",
-                        "Vermont": "VT",
-                        "Virginia": "VA",
-                        "Washington": "WA",
-                        "West Virginia": "WV",
-                        "Wisconsin": "WI",
-                        "Wyoming": "WY",
-                    }
-
-                    nhd_collections = []
-                    for state in state_names:
-                        state_initial = state_initials.get(state)
-                        if state_initial:
-                            nhd_dataset = ee.FeatureCollection(
-                                f"projects/sat-io/open-datasets/NHD/NHD_{state_initial}/NHDFlowline"
-                            )
-                            nhd_collections.append(nhd_dataset)
+                    nhd_collections = load_nhd_collections(state_names)
 
                     if nhd_collections:
                         merged_nhd = ee.FeatureCollection(nhd_collections).flatten()
@@ -265,14 +113,17 @@ if st.session_state.questionnaire_shown:
                         st.session_state.step2_complete = True
 
                         # Display map
-                        Waterway_map = geemap.Map()
-                        Waterway_map.add_basemap("SATELLITE")
-                        Waterway_map.centerObject(st.session_state["Full_positive"])
+                        waterway_map = geemap.Map()
+                        waterway_map.add_basemap("SATELLITE")
+                        waterway_map.centerObject(st.session_state["Full_positive"])
                         # Add waterway layer first
-                        Waterway_map.addLayer(st.session_state.selected_waterway, {"color": "blue"}, "Selected Waterway")
+                        waterway_map.addLayer(
+                            st.session_state.selected_waterway, {"color": "blue"}, "Selected Waterway"
+                        )
                         # Then add dam points layer
-                        Waterway_map.addLayer(st.session_state["Full_positive"], {"color": "red"}, "Dams")
-                        Waterway_map.to_streamlit(width=1200, height=700)
+                        waterway_map.addLayer(st.session_state["Full_positive"], {"color": "red"}, "Dams")
+                        waterway_map.to_streamlit(width=AppConstants.LARGE_MAP_WIDTH,
+                                                  height=AppConstants.LARGE_MAP_HEIGHT)
 
                         # Provide additional options
                         st.subheader("To use a different waterway map instead:")
@@ -317,7 +168,8 @@ if st.session_state.questionnaire_shown:
             st.error("Please complete Step 1 first.")
 
     with st.expander(
-        "Step 3: Validate Dam Locations", expanded=st.session_state.step2_complete and not st.session_state.step3_complete
+        "Step 3: Validate Dam Locations",
+        expanded=st.session_state.step2_complete and not st.session_state.step3_complete,
     ):
         st.header("Step 3: Validate Dam Locations")
 
@@ -325,7 +177,11 @@ if st.session_state.questionnaire_shown:
         if not st.session_state.validation_complete:
             # Add validation parameters
             max_distance = st.number_input(
-                "Maximum allowed distance from waterway (meters):", min_value=0, value=50, step=10, key="max_distance_input"
+                "Maximum allowed distance from waterway (meters):",
+                min_value=AppConstants.MIN_MAX_DISTANCE,
+                value=AppConstants.DEFAULT_MAX_DISTANCE,
+                step=AppConstants.DISTANCE_STEP,
+                key="max_distance_input",
             )
 
             # Validate positive dams
@@ -370,7 +226,9 @@ if st.session_state.questionnaire_shown:
                                 validation_map = visualize_validation_results(
                                     st.session_state["Full_positive"], st.session_state["Waterway"], validation_results
                                 )
-                                validation_map.to_streamlit(width=1200, height=700)
+                                validation_map.to_streamlit(width=AppConstants.LARGE_MAP_WIDTH,
+                                                          height=AppConstants.LARGE_MAP_HEIGHT)
+
 
                         except Exception as e:
                             st.error(f"Error during validation: {str(e)}")
@@ -499,9 +357,9 @@ if st.session_state.questionnaire_shown:
                                         # Get date from the first positive sample
                                         first_pos = st.session_state.Positive_collection.first()
                                         date = first_pos.get("date")
-                                    return feature.set("id_property", ee.String("P").cat(idx.add(1).int().format())).set(
-                                        "date", date
-                                    )
+                                    return feature.set(
+                                        "id_property", ee.String("P").cat(idx.add(1).int().format())
+                                    ).set("date", date)
 
                                 Positive_dam_id = ee.FeatureCollection(pos_indices.map(set_id_positives))
 
@@ -523,7 +381,7 @@ if st.session_state.questionnaire_shown:
                                 preview_map.addLayer(Neg_points_id, {"color": "red"}, "Non-dam locations")
                                 preview_map.addLayer(Positive_dam_id, {"color": "blue"}, "Dam locations")
                                 preview_map.centerObject(Merged_collection)
-                                preview_map.to_streamlit(width=800, height=600)
+                                preview_map.to_streamlit(width=AppConstants.MAP_WIDTH, height=AppConstants.MAP_HEIGHT)
                         except Exception as e:
                             st.error(f"Error processing file: {str(e)}")
                             st.error(traceback.format_exc())  # Show detailed error information
@@ -531,13 +389,21 @@ if st.session_state.questionnaire_shown:
             if generate_negatives_checkbox:
                 st.subheader("Specify the parameters for negative point generation:")
                 st.image("assets/Negative_sampling_image.png")
-                innerRadius = st.number_input(
-                    "Inner Radius (meters)", value=300, min_value=0, step=50, key="inner_radius_input"
+                inner_radius = st.number_input(
+                    "Inner Radius (meters)",
+                    value=AppConstants.DEFAULT_INNER_RADIUS,
+                    min_value=0,
+                    step=AppConstants.RADIUS_STEP,
+                    key="inner_radius_input"
                 )
-                outerRadius = st.number_input(
-                    "Outer Radius (meters)", value=500, min_value=0, step=50, key="outer_radius_input"
+                outer_radius = st.number_input(
+                    "Outer Radius (meters)",
+                    value=AppConstants.DEFAULT_OUTER_RADIUS,
+                    min_value=0,
+                    step=AppConstants.RADIUS_STEP,
+                    key="outer_radius_input"
                 )
-                samplingScale = 10
+                sampling_scale = AppConstants.SAMPLING_SCALE
 
                 if st.button("Generate Negative Points"):
                     with st.spinner("Generating negative points..."):
@@ -585,11 +451,11 @@ if st.session_state.questionnaire_shown:
                                 )
                                 st.stop()
 
-                            hydroRaster = prepareHydro(waterway_fc)
+                            hydroRaster = prepare_hydro(waterway_fc)
 
                             # Generate negative points
-                            negativePoints = sampleNegativePoints(
-                                positive_dams_fc, hydroRaster, innerRadius, outerRadius, samplingScale
+                            negativePoints = sample_negative_points(
+                                positive_dams_fc, hydroRaster, inner_radius, outer_radius, sampling_scale
                             )
 
                             # Check if negative points were generated
@@ -624,7 +490,9 @@ if st.session_state.questionnaire_shown:
                             def set_id_negatives2(idx):
                                 idx = ee.Number(idx)
                                 feature = ee.Feature(features_list.get(idx))
-                                labeled_feature = feature.set("id_property", ee.String("N").cat(idx.add(1).int().format()))
+                                labeled_feature = feature.set(
+                                    "id_property", ee.String("N").cat(idx.add(1).int().format())
+                                )
                                 return labeled_feature
 
                             Neg_points_id = ee.FeatureCollection(indices.map(set_id_negatives2))
@@ -643,7 +511,9 @@ if st.session_state.questionnaire_shown:
                             def set_id_positives(idx):
                                 idx = ee.Number(idx)
                                 feature = ee.Feature(pos_features_list.get(idx))
-                                labeled_feature = feature.set("id_property", ee.String("P").cat(idx.add(1).int().format()))
+                                labeled_feature = feature.set(
+                                    "id_property", ee.String("P").cat(idx.add(1).int().format())
+                                )
                                 return labeled_feature
 
                             Positive_dam_id = ee.FeatureCollection(pos_indices.map(set_id_positives))
@@ -652,12 +522,13 @@ if st.session_state.questionnaire_shown:
                             st.session_state.buffer_complete = True
                             st.session_state.step4_complete = True
                             # Create and display the map
-                            Negative_points = geemap.Map()
-                            Negative_points.add_basemap("SATELLITE")
-                            Negative_points.addLayer(negativePoints, {"color": "red", "width": 2}, "Negative")
-                            Negative_points.addLayer(Positive_dam_id, {"color": "blue"}, "Positive")
-                            Negative_points.centerObject(Merged_collection)
-                            Negative_points.to_streamlit(width=1200, height=700)
+                            negative_points = geemap.Map()
+                            negative_points.add_basemap("SATELLITE")
+                            negative_points.addLayer(negativePoints, {"color": "red", "width": 2}, "Negative")
+                            negative_points.addLayer(Positive_dam_id, {"color": "blue"}, "Positive")
+                            negative_points.centerObject(Merged_collection)
+                            negative_points.to_streamlit(width=AppConstants.LARGE_MAP_WIDTH,
+                                                         height=AppConstants.LARGE_MAP_HEIGHT)
 
                             # Set completion status
                             st.success("✅ Negative points generated successfully!")
@@ -680,8 +551,8 @@ if st.session_state.questionnaire_shown:
             st.subheader("Buffer Settings")
             buffer_radius = st.number_input(
                 "Enter buffer radius (meters). We will analyze locations within this buffer that are no more than 3m in elevation away from the dam location.",
-                min_value=1,
-                step=1,
+                min_value=AppConstants.MIN_BUFFER_RADIUS,
+                step=AppConstants.BUFFER_STEP,
                 value=st.session_state.buffer_radius,
                 key="buffer_radius_input",
             )
@@ -731,10 +602,14 @@ if st.session_state.questionnaire_shown:
                             )
 
                         # Create buffers
-                        Buffered_collection = st.session_state.Merged_collection.map(add_dam_buffer_and_standardize_date)
+                        Buffered_collection = st.session_state.Merged_collection.map(
+                            add_dam_buffer_and_standardize_date
+                        )
 
                         # Select relevant properties
-                        Dam_data = Buffered_collection.select(["id_property", "Dam", "Survey_Date", "Damdate", "Point_geo"])
+                        Dam_data = Buffered_collection.select(
+                            ["id_property", "Dam", "Survey_Date", "Damdate", "Point_geo"]
+                        )
 
                         # Save to session state
                         st.session_state.Dam_data = Dam_data
@@ -785,7 +660,6 @@ if st.session_state.questionnaire_shown:
                                                 st.error("Find no date in the data. Please check your data.")
                                                 return None
 
-                                        standardized_date = ee.Date(date)
                                         return feature
                                     except Exception as e:
                                         st.error(f"Date validation error: {str(e)}")
@@ -799,7 +673,7 @@ if st.session_state.questionnaire_shown:
 
                                 # Get total number of dam points
                                 total_count = Dam_data.size().getInfo()
-                                batch_size = 30  # Increased batch size for efficiency
+                                batch_size = AppConstants.BATCH_SIZE
                                 num_batches = (total_count + batch_size - 1) // batch_size
                                 df_list = []
 
@@ -816,10 +690,10 @@ if st.session_state.questionnaire_shown:
                                         dam_batch_fc = ee.FeatureCollection(dam_batch)
 
                                         # Process this batch through the entire pipeline
-                                        S2_cloud_mask_batch = ee.ImageCollection(S2_Export_for_visual(dam_batch_fc))
+                                        S2_cloud_mask_batch = ee.ImageCollection(s2_export_for_visual(dam_batch_fc))
                                         S2_ImageCollection_batch = ee.ImageCollection(S2_cloud_mask_batch)
                                         S2_with_LST_batch = S2_ImageCollection_batch.map(add_landsat_lst_et)
-                                        results_fc_lst_batch = S2_with_LST_batch.map(compute_all_metrics_LST_ET)
+                                        results_fc_lst_batch = S2_with_LST_batch.map(compute_all_metrics_lst_et)
                                         results_fcc_lst_batch = ee.FeatureCollection(results_fc_lst_batch)
 
                                         # Convert directly to DataFrame
@@ -952,7 +826,7 @@ if st.session_state.questionnaire_shown:
 
                                     # Batch processing
                                     total_count = Dam_data.size().getInfo()
-                                    batch_size = 30  # Increased batch size for efficiency
+                                    batch_size = AppConstants.BATCH_SIZE
                                     num_batches = (total_count + batch_size - 1) // batch_size
                                     df_list = []
 
@@ -968,7 +842,7 @@ if st.session_state.questionnaire_shown:
                                             dam_batch_fc = ee.FeatureCollection(dam_batch)
 
                                             # Process this batch through the entire pipeline
-                                            S2_IC_batch = S2_Export_for_visual_flowdir(dam_batch_fc, waterway_fc)
+                                            S2_IC_batch = s2_export_for_visual_flowdir(dam_batch_fc, waterway_fc)
                                             S2_with_LST_ET = S2_IC_batch.map(add_landsat_lst_et)
                                             results_batch = S2_with_LST_ET.map(compute_all_metrics_up_downstream)
 
@@ -1036,7 +910,7 @@ if st.session_state.questionnaire_shown:
                                         st.download_button(
                                             "Download Up/Downstream Figures",
                                             buf2,
-                                            "up_downstream.png",
+                                            "upstream_downstream_trends.png",
                                             "image/png",
                                             key="download_updown_fig",
                                         )
@@ -1085,7 +959,7 @@ if st.session_state.questionnaire_shown:
                                             st.download_button(
                                                 "Download Up/Downstream Data (CSV)",
                                                 csv2,
-                                                "updown_data.csv",
+                                                "upstream_downstream_data.csv",
                                                 "text/csv",
                                                 key="download_updown_csv",
                                             )
@@ -1105,7 +979,7 @@ if st.session_state.questionnaire_shown:
                         st.download_button(
                             "Download Up/Downstream Figures",
                             buf2,
-                            "up_downstream.png",
+                            "upstream_downstream_trends.png",
                             "image/png",
                             key="redisplay_updown_fig",
                         )
@@ -1120,7 +994,7 @@ if st.session_state.questionnaire_shown:
                                 coords_df = extract_coordinates_df(st.session_state.Dam_data)
 
                                 if not coords_df.empty:
-                                    # Create a list to store coordinates
+                                    months_per_point = len(export_df) // len(coords_df)
                                     longitudes = []
                                     latitudes = []
 
@@ -1151,7 +1025,7 @@ if st.session_state.questionnaire_shown:
                             st.download_button(
                                 "Download Up/Downstream Data (CSV)",
                                 csv2,
-                                "updown_data.csv",
+                                "upstream_downstream_data.csv",
                                 "text/csv",
                                 key="download_updown_csv",
                             )

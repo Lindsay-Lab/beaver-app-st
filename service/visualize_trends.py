@@ -1,5 +1,12 @@
+"""
+Functions for visualizing trends.
+Sentinel-2 Dam Imagery Processing Module.
+
+This module provides functions for extracting and processing Sentinel-2 imagery around dam locations with
+ elevation-based masking and optional flow direction analysis.
+"""
+
 import ee
-import pandas as pd
 import streamlit as st
 
 from .earth_engine_auth import initialize_earth_engine
@@ -7,48 +14,141 @@ from .earth_engine_auth import initialize_earth_engine
 initialize_earth_engine()
 
 
-####### Functions to for filtering collection
-### Filtering without flow direction
-def S2_Export_for_visual(Dam_Collection):
+def s2_export_for_visual(dam_collection: ee.FeatureCollection) -> ee.ImageCollection:
+    """
+    Extract cloud-masked Sentinel-2 imagery with elevation masking for dam monitoring.
+
+    This function processes a collection of dam locations to extract Sentinel-2 imagery
+    with cloud masking and elevation-based filtering. Unlike the flow direction version,
+    this function focuses on basic imagery extraction with elevation constraints around
+    each dam location. It returns monthly composites of the least cloudy images.
+
+    Parameters
+    ----------
+    dam_collection : ee.FeatureCollection
+        Collection of dam features with required properties:
+        - Survey_Date : ee.Date or str
+            Date for temporal filtering (±6 months window)
+        - id_property : str
+            Unique identifier for the dam
+        - Dam : str
+            Dam status/type classification
+        - Damdate : str
+            Date string associated with the dam
+        - Point_geo : ee.Geometry.Point, optional
+            Point geometry of the dam location. If None/null, 
+            the centroid of the feature geometry will be used.
+
+    Returns
+    -------
+    ee.ImageCollection
+        Collection of processed monthly Sentinel-2 images with bands:
+        - S2_Blue, S2_Green, S2_Red, S2_NIR : ee.Image bands
+            Renamed Sentinel-2 spectral bands (B2, B3, B4, B8)
+        - S2_Binary_cloudMask : ee.Image band
+            Binary cloud mask (1=clear, 0=cloudy/cirrus)
+        - elevation : ee.Image band  
+            Elevation mask filtered to ±3m/±5m around dam elevation
+
+        Each image includes metadata properties:
+        - First_id : str
+            Composite identifier: {dam_id}_{dam_status}_S2id:_{s2_index}_{dam_date}
+        - Full_id : str
+            Extended identifier with cloud coverage: {First_id}_Cloud_{cloud_percent}
+        - Dam_id : str
+            Original dam identifier
+        - Dam_status : str
+            Dam classification status
+        - Image_month : int
+            Month of image acquisition (1-12)
+        - Image_year : int
+            Year of image acquisition
+        - Area : ee.Geometry
+            Bounding geometry for the analysis area
+        - Cloud_coverage : float
+            Percentage of cloud coverage in the image (0-100)
+        - acquisition_date : ee.Date
+            Date when the Sentinel-2 image was acquired
+        - Point_geo : ee.Geometry.Point
+            Dam point location (original or computed centroid)
+
+    Notes
+    -----
+    The function performs several key processing steps:
+
+    1. **Temporal Filtering**: Filters Sentinel-2 data to ±6 months from Survey_Date
+    2. **Cloud Masking**: Uses QA60 band to create binary cloud masks
+    3. **Elevation Masking**: Filters elevation data to dam elevation +3m/-5m using 3DEP 10m DEM
+    4. **Monthly Aggregation**: Selects the least cloudy image for each month (1-12)
+    5. **Band Renaming**: Standardizes band names for consistency
+
+    The elevation masking process:
+    - Samples elevation at the dam point location
+    - Creates elevation range: [dam_elevation - 5m, dam_elevation + 3m] 
+    - Masks pixels outside this elevation range
+    - Clips all data to the dam's bounding geometry
+
+    Error handling is implemented to catch processing failures and display
+    warnings through Streamlit interface.
+
+    Examples
+    --------
+    `>>> dams = ee.FeatureCollection('projects/my-project/assets/dam-locations')`
+    `>>> result_images = S2_Export_for_visual(dams)`
+    `>>> print(f"Generated {result_images.size().getInfo()} images")`
+    `>>> first_image = ee.Image(result_images.first())`
+    `>>> print(f"Bands: {first_image.bandNames().getInfo()}")`
+    `>>> print(f"Dam ID: {first_image.get('Dam_id').getInfo()}")`
+
+    See Also
+    --------
+    S2_Export_for_visual_flowdir : Version with flow direction analysis
+
+    Raises
+    ------
+    Exception
+        Any processing errors are caught and logged as Streamlit warnings.
+        Failed dam locations return None and are filtered from final collection.
+    """
     def extract_pixels(box):
         try:
-            imageDate = ee.Date(box.get("Survey_Date"))
-            StartDate = imageDate.advance(-6, "month").format("YYYY-MM-dd")
-            EndDate = imageDate.advance(6, "month").format("YYYY-MM-dd")
+            image_date = ee.Date(box.get("Survey_Date"))
+            start_date = image_date.advance(-6, "month").format("YYYY-MM-dd")
+            end_date = image_date.advance(6, "month").format("YYYY-MM-dd")
 
-            boxArea = box.geometry()
-            damId = box.get("id_property")
-            DamStatus = box.get("Dam")
-            DamDate = box.get("Damdate")
-            DamGeo = box.get("Point_geo")
+            box_area = box.geometry()
+            dam_id = box.get("id_property")
+            dam_status = box.get("Dam")
+            dam_date = box.get("Damdate")
+            dam_geo = box.get("Point_geo")
 
             # Ensure Point_geo is a valid point geometry
             point_geo = ee.Algorithms.If(
-                ee.Algorithms.IsEqual(DamGeo, None), boxArea.centroid(), DamGeo  # Use centroid if Point_geo is None
+                ee.Algorithms.IsEqual(dam_geo, None), box_area.centroid(), dam_geo  # Use centroid if Point_geo is None
             )
 
-            S2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+            s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
 
             def add_cloud_mask_band(image):
                 qa = image.select("QA60")
-                cloudBitMask = 1 << 10
-                cirrusBitMask = 1 << 11
-                cloud_mask = qa.bitwiseAnd(cloudBitMask).eq(0).And(qa.bitwiseAnd(cirrusBitMask).eq(0))
+                cloud_bit_mask = 1 << 10
+                cirrus_bit_mask = 1 << 11
+                cloud_mask = qa.bitwiseAnd(cloud_bit_mask).eq(0).And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
                 cloud_mask_band = cloud_mask.rename("cloudMask").toUint16()
                 return image.addBands(cloud_mask_band)
 
-            S2_cloud_band = S2.map(add_cloud_mask_band)
+            s2_cloud_band = s2.map(add_cloud_mask_band)
 
-            oldBandNames = ["B2", "B3", "B4", "B8", "cloudMask"]
-            newBandNames = ["S2_Blue", "S2_Green", "S2_Red", "S2_NIR", "S2_Binary_cloudMask"]
-            S2_named_bands = S2_cloud_band.map(lambda image: image.select(oldBandNames).rename(newBandNames))
+            old_band_names = ["B2", "B3", "B4", "B8", "cloudMask"]
+            new_band_names = ["S2_Blue", "S2_Green", "S2_Red", "S2_NIR", "S2_Binary_cloudMask"]
+            s2_named_bands = s2_cloud_band.map(lambda image: image.select(old_band_names).rename(new_band_names))
 
-            def addAcquisitionDate(image):
+            def add_acquisition_date(image):
                 date = ee.Date(image.get("system:time_start"))
                 return image.set("acquisition_date", date)
 
-            S2_cloud_filter = S2_named_bands.map(addAcquisitionDate)
-            filteredCollection = S2_cloud_filter.filterDate(StartDate, EndDate).filterBounds(boxArea)
+            s2_cloud_filter = s2_named_bands.map(add_acquisition_date)
+            filtered_collection = s2_cloud_filter.filterDate(start_date, end_date).filterBounds(box_area)
 
             def add_band(image):
                 index = image.get("system:index")
@@ -62,7 +162,7 @@ def S2_Export_for_visual(Dam_Collection):
 
                 point_geom = point_geo  # Use processed point_geo
                 point_elevation = ee.Number(elevation.sample(point_geom, 10).first().get("elevation"))
-                buffered_area = boxArea
+                buffered_area = box_area
                 elevation_clipped = elevation.clip(buffered_area)
 
                 point_plus = point_elevation.add(3)
@@ -74,23 +174,24 @@ def S2_Export_for_visual(Dam_Collection):
                 )
                 elevation_masked2 = elevation_masked.updateMask(elevation_masked.eq(1))
 
-                Full_image = (
+                full_image = (
                     image.set(
-                        "First_id", ee.String(damId).cat("_").cat(DamStatus).cat("_S2id:_").cat(index).cat("_").cat(DamDate)
+                        "First_id",
+                        ee.String(dam_id).cat("_").cat(dam_status).cat("_S2id:_").cat(index).cat("_").cat(dam_date),
                     )
-                    .set("Dam_id", damId)
-                    .set("Dam_status", DamStatus)
+                    .set("Dam_id", dam_id)
+                    .set("Dam_status", dam_status)
                     .set("Image_month", image_month)
                     .set("Image_year", image_year)
-                    .set("Area", boxArea)
-                    .set("id_property", damId)
+                    .set("Area", box_area)
+                    .set("id_property", dam_id)
                     .set("Point_geo", point_geo)
-                    .clip(boxArea)
+                    .clip(box_area)
                 )
 
-                return Full_image.addBands(elevation_masked2)
+                return full_image.addBands(elevation_masked2)
 
-            filteredCollection2 = filteredCollection.map(add_band)
+            filtered_collection2 = filtered_collection.map(add_band)
 
             def calculate_cloud_coverage(image):
                 cloud = image.select("S2_Binary_cloudMask")
@@ -101,95 +202,152 @@ def S2_Export_for_visual(Dam_Collection):
                 cloud_coverage_percentage = ee.Number(100).subtract(clear_coverage_percentage)
                 return image.set("Cloud_coverage", cloud_coverage_percentage)
 
-            filteredCloudCollection = filteredCollection2.map(calculate_cloud_coverage)
+            filtered_cloud_collection = filtered_collection2.map(calculate_cloud_coverage)
 
-            def get_monthly_least_cloudy_images(Collection):
+            def get_monthly_least_cloudy_images(collection):
                 months = ee.List.sequence(1, 12)
 
                 def get_month_image(month):
-                    monthly_images = Collection.filter(ee.Filter.calendarRange(month, month, "month"))
+                    monthly_images = collection.filter(ee.Filter.calendarRange(month, month, "month"))
                     return ee.Image(monthly_images.sort("CLOUDY_PIXEL_PERCENTAGE").first())
 
                 monthly_images_list = months.map(get_month_image)
                 return ee.ImageCollection.fromImages(monthly_images_list)
 
-            filteredCollectionBands = get_monthly_least_cloudy_images(filteredCloudCollection)
+            filtered_collection_bands = get_monthly_least_cloudy_images(filtered_cloud_collection)
 
-            def addCloud(image):
-                id = image.get("First_id")
-                cloud = image.get("Cloud_coverage")
-                return image.set("Full_id", ee.String(id).cat("_Cloud_").cat(cloud))
+            complete_collection = filtered_collection_bands.map(_add_cloud_coverage_to_id)
+            return complete_collection
 
-            Complete_collection = filteredCollectionBands.map(addCloud)
-            return Complete_collection
-
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             st.warning(f"Error processing image: {str(e)}")
             return None
 
-    ImageryCollections = Dam_Collection.map(extract_pixels).flatten()
-    return ee.ImageCollection(ImageryCollections)
+    imagery_collections = dam_collection.map(extract_pixels).flatten()
+    return ee.ImageCollection(imagery_collections)
 
 
-##### Filtering with flowline
-def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
+def s2_export_for_visual_flowdir(dam_collection: ee.FeatureCollection,
+                                 filtered_waterway: ee.FeatureCollection) -> ee.ImageCollection:
+    """
+    Filtering with flowline.
+
+    Extract Sentinel-2 imagery with flow direction analysis for dam monitoring.
+
+    This function processes a collection of dam locations to extract cloud-masked Sentinel-2
+    imagery along with upstream/downstream flow direction analysis based on nearby waterways
+    and elevation data. For each dam location, it identifies the closest flowline, determines
+    flow direction, and creates masked elevation bands for upstream and downstream areas.
+
+    Parameters
+    ----------
+    dam_collection : ee.FeatureCollection
+        Collection of dam features with required properties:
+        - Survey_Date: Date for temporal filtering (±6 months)
+        - id_property: Unique identifier for the dam
+        - Dam: Dam status/type
+        - Damdate: Date string for the dam
+        - Point_geo: Point geometry of the dam location
+
+    filtered_waterway : ee.FeatureCollection
+        Collection of waterway/flowline features used for flow direction analysis.
+        Should contain linear geometries representing water flow paths.
+
+    Returns
+    -------
+    ee.ImageCollection
+        Collection of processed Sentinel-2 images with additional bands:
+        - S2_Blue, S2_Green, S2_Red, S2_NIR: Renamed Sentinel-2 bands
+        - S2_Binary_cloudMask: Binary cloud mask (1=clear, 0=cloudy)
+        - downstream: Elevation mask for downstream flow areas
+        - upstream: Elevation mask for upstream flow areas
+        - elevation: Base elevation mask around dam location
+
+        Each image includes metadata:
+        - First_id, Full_id: Composite identifiers
+        - Dam_id, Dam_status: Dam identification
+        - Image_month, Image_year: Temporal information
+        - Cloud_coverage: Percentage cloud coverage
+        - Area: Bounding geometry
+
+    Notes
+    -----
+    The function performs several complex operations:
+    1. Temporal filtering of Sentinel-2 data (±6 months from survey date)
+    2. Cloud masking using QA60 band
+    3. Elevation-based masking using 3DEP 10m DEM
+    4. Flow direction analysis using closest flowline identification
+    5. Geometric splitting into upstream/downstream regions
+    6. Monthly aggregation selecting least cloudy images
+
+    The flow direction analysis works by:
+    - Finding the closest flowline to the dam point
+    - Creating a perpendicular line across the flow
+    - Splitting the analysis area into upstream/downstream halves
+    - Classifying other flowlines based on spatial relationships
+    - Creating elevation masks for each flow direction
+
+    Examples
+    --------
+    `>>> dam_points = ee.FeatureCollection('projects/my-project/assets/dam-locations')`
+    `>>> waterways = ee.FeatureCollection('USGS/NHDPlus/HR/NHDFlowline')`
+    `>>> result = S2_Export_for_visual_flowdir(dam_points, waterways)`
+    `>>> print(f"Generated {result.size().getInfo()} images")`
+    """
+
     def extract_pixels(box):
-        imageDate = ee.Date(box.get("Survey_Date"))
-        StartDate = imageDate.advance(-6, "month").format("YYYY-MM-dd")
+        image_date = ee.Date(box.get("Survey_Date"))
+        start_date = image_date.advance(-6, "month").format("YYYY-MM-dd")
 
-        EndDate = imageDate.advance(6, "month").format("YYYY-MM-dd")
+        end_date = image_date.advance(6, "month").format("YYYY-MM-dd")
 
-        boxArea = box.geometry()
+        box_area = box.geometry()
         # DateString = box.get("stringID")
-        damId = box.get("id_property")
-        DamStatus = box.get("Dam")
-        DamDate = box.get("Damdate")
-        DamGeo = box.get("Point_geo")
-        S2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+        dam_id = box.get("id_property")
+        dam_status = box.get("Dam")
+        dam_date = box.get("Damdate")
+        s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
 
-        ## Add band for cloud coverage
+        # Add band for cloud coverage
         def add_cloud_mask_band(image):
             qa = image.select("QA60")
 
             # Bits 10 and 11 are clouds and cirrus, respectively.
-            cloudBitMask = 1 << 10
-            cirrusBitMask = 1 << 11
+            cloud_bit_mask = 1 << 10
+            cirrus_bit_mask = 1 << 11
 
             # Both flags should be set to zero, indicating clear conditions.
-            cloud_mask = qa.bitwiseAnd(cloudBitMask).eq(0).And(qa.bitwiseAnd(cirrusBitMask).eq(0))
+            cloud_mask = qa.bitwiseAnd(cloud_bit_mask).eq(0).And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
             # Create a band with values 1 (clear) and 0 (cloudy or cirrus) and convert from byte to Uint16
             cloud_mask_band = cloud_mask.rename("cloudMask").toUint16()
 
             return image.addBands(cloud_mask_band)
 
         # Define the dataset
-        S2_cloud_band = S2.map(add_cloud_mask_band)
+        s2_cloud_band = s2.map(add_cloud_mask_band)
 
         # Change band names
-        oldBandNames = ["B2", "B3", "B4", "B8", "cloudMask"]
-        newBandNames = ["S2_Blue", "S2_Green", "S2_Red", "S2_NIR", "S2_Binary_cloudMask"]  # 'S2_NDVI']
+        old_band_names = ["B2", "B3", "B4", "B8", "cloudMask"]
+        new_band_names = ["S2_Blue", "S2_Green", "S2_Red", "S2_NIR", "S2_Binary_cloudMask"]  # 'S2_NDVI']
 
-        S2_named_bands = S2_cloud_band.map(lambda image: image.select(oldBandNames).rename(newBandNames))
+        s2_named_bands = s2_cloud_band.map(lambda image: image.select(old_band_names).rename(new_band_names))
 
         # Define a function to add the masked image as a band to the images
-        def addAcquisitionDate(image):
+        def add_acquisition_date(image):
             date = ee.Date(image.get("system:time_start"))
             return image.set("acquisition_date", date)
 
-        S2_cloud_filter = S2_named_bands.map(addAcquisitionDate)
+        s2_cloud_filter = s2_named_bands.map(add_acquisition_date)
 
-        filteredCollection = S2_cloud_filter.filterDate(StartDate, EndDate).filterBounds(boxArea)
+        filtered_collection = s2_cloud_filter.filterDate(start_date, end_date).filterBounds(box_area)
 
         def add_band(image):
             index = image.get("system:index")
             image_date = ee.Date(image.get("system:time_start"))
             image_month = image_date.get("month")
             image_year = image_date.get("year")
-            cloud = image.get("CLOUDY_PIXEL_PERCENTAGE")
-            # intersect = image.get('intersection_ratio')
 
-            ### buffered_geometry
-            # buffered_geometry = boxArea.geometry()
+            ## buffered_geometry
             buffered_geometry = box.geometry()
             point_geom = buffered_geometry.centroid()
             buffered_geometry = point_geom.buffer(200)
@@ -200,7 +358,6 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             elevation_select = dataset.select("elevation")
             elevation = ee.Image(elevation_select)
 
-            # point_geom = firstFeature.geometry()
             point_elevation = ee.Number(elevation.sample(point_geom, 10).first().get("elevation"))
 
             # Clip and mask based on some +/- thresholds
@@ -236,7 +393,7 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             distance_to_line = main_geom.distance(point_geom)
 
             # Buffer the point by this distance.
-            # (Note: if the point lies exactly on the line, distance_to_line will be 0. You might need a check for that.)
+            # Note: if the point lies exactly on the line, distance_to_line will be 0. You might need a check for that.
             buffer_radius = ee.Number(distance_to_line).add(1)  # or some small number in degrees
             buffered_point = point_geom.buffer(buffer_radius)
             # buffered_point_2 = point_geom.buffer(distance_to_line)
@@ -246,21 +403,18 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
 
             coords = ee.List(closest_point_geom.coordinates())
 
-            List = coords.flatten()
+            coords_list = coords.flatten()
 
-            new_coord = ee.List([ee.Number(List.get(0)), ee.Number(List.get(1))])
+            new_coord = ee.List([ee.Number(coords_list.get(0)), ee.Number(coords_list.get(1))])
             closest_point = ee.Geometry.Point(new_coord)
 
             # closest_point = ee.Geometry.Point(coords.get(0))
 
             p1 = ee.Geometry.Point(new_coord)
 
-            second_coord = ee.List([ee.Number(List.get(2)), ee.Number(List.get(3))])
+            second_coord = ee.List([ee.Number(coords_list.get(2)), ee.Number(coords_list.get(3))])
 
             p2 = ee.Geometry.Point(second_coord)
-
-            # Create the first linestring between p1 and p2
-            line1 = ee.Geometry.LineString([p1.coordinates(), p2.coordinates()])
 
             # Cast each coordinate to an ee.Number so we can do arithmetic
             x1 = ee.Number(p1.coordinates().get(0))
@@ -281,8 +435,6 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             dx_perp = dy
             dy_perp = dx.multiply(-1)
 
-            dx_half = dx_perp.divide(2)
-            dy_half = dy_perp.divide(2)
             length_factor = 10
 
             # Scale the perpendicular vector
@@ -300,18 +452,16 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             buffered_poly = extended_perpendicular.buffer(buffer_distance)
 
             bbox = buffered_poly.bounds()  # This is an ee.Geometry with a single ring
-            boundingCoords = bbox.coordinates()  # ee.List
-            boundingRing = ee.List(boundingCoords.get(0))  # ee.List of [ [west, south], [west, north], ... ]
+            bounding_coords = bbox.coordinates()  # ee.coords_list
+            bounding_ring = ee.List(bounding_coords.get(0))  # ee.coords_list of [ [west, south], [west, north], ... ]
 
-            westSouth = ee.List(boundingRing.get(0))  # [west, south]
-            westNorth = ee.List(boundingRing.get(1))  # [west, north]
-            eastNorth = ee.List(boundingRing.get(2))  # [east, north]
-            eastSouth = ee.List(boundingRing.get(3))  # [east, south]
+            west_south = ee.List(bounding_ring.get(0))  # [west, south]
+            east_north = ee.List(bounding_ring.get(2))  # [east, north]
 
-            west = ee.Number(westSouth.get(0))
-            south = ee.Number(westSouth.get(1))
-            east = ee.Number(eastNorth.get(0))
-            north = ee.Number(eastNorth.get(1))
+            west = ee.Number(west_south.get(0))
+            south = ee.Number(west_south.get(1))
+            east = ee.Number(east_north.get(0))
+            north = ee.Number(east_north.get(1))
 
             # Mid-latitude
             mid_lat = south.add(north).divide(2)
@@ -328,8 +478,6 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             bot_feature = ee.Feature(bot_poly, {"id": "bot"})
 
             # Step 2: Buffer the extended line just enough to make a thin clipping strip
-            split_strip = extended_perpendicular.buffer(1)
-
             def get_closest_vertex_index(coords, pt):
                 distances = coords.map(lambda c: ee.Geometry.Point(c).distance(pt))
                 min_dist = distances.reduce(ee.Reducer.min())
@@ -344,7 +492,7 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             upstream_coords = line_coords.slice(0, ee.Number(closest_index).add(1))
             downstream_coords = line_coords.slice(ee.Number(closest_index), line_coords.size())
 
-            #################
+            #
 
             def ensure_two_coords(coords, main_coords, closest_idx, direction):
                 """
@@ -375,7 +523,7 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             upstream_coords_fixed = ensure_two_coords(upstream_coords, line_coords, closest_index, "up")
             downstream_coords_fixed = ensure_two_coords(downstream_coords, line_coords, closest_index, "down")
 
-            # Convert them to ee.List for further manipulation.
+            # Convert them to ee.coords_list for further manipulation.
             upstream_list = ee.List(upstream_coords_fixed)
             downstream_list = ee.List(downstream_coords_fixed)
 
@@ -387,7 +535,9 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
                 # If upstream is bigger, remove its last coordinate.
                 # Otherwise (or if equal), remove the first coordinate from downstream.
                 trimmed_up = ee.Algorithms.If(
-                    up_size.gt(down_size), up_coords.slice(0, up_size.subtract(1)), up_coords  # remove last from upstream
+                    up_size.gt(down_size),
+                    up_coords.slice(0, up_size.subtract(1)),
+                    up_coords,  # remove last from upstream
                 )
                 trimmed_down = ee.Algorithms.If(
                     up_size.gte(down_size), down_coords, down_coords.slice(1)  # remove first from downstream
@@ -403,7 +553,7 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             upstream_line = ee.Geometry.LineString(final_up_coords)
             downstream_line = ee.Geometry.LineString(final_down_coords)
 
-            ##################
+            ##
             # Define upstream and downstream lines
             # upstream_line = ee.Geometry.LineString(upstream_coords)
             # downstream_line = ee.Geometry.LineString(downstream_coords)
@@ -417,7 +567,9 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
                     # If up == True
                     ee.Algorithms.If(intersects_down, feature.set("flow", "both"), feature.set("flow", "upstream")),
                     # else (up == False)
-                    ee.Algorithms.If(intersects_down, feature.set("flow", "downstream"), feature.set("flow", "unknown")),
+                    ee.Algorithms.If(
+                        intersects_down, feature.set("flow", "downstream"), feature.set("flow", "unknown")
+                    ),
                 )
 
             halves = ee.FeatureCollection([top_feature, bot_feature])
@@ -427,8 +579,8 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             features = labeled_halves.toList(labeled_halves.size())
             f1 = ee.Feature(features.get(0))
             f2 = ee.Feature(features.get(1))
-            f1_flow = f1.getString("flow")  ## upstream
-            f2_flow = f2.getString("flow")  ## both
+            f1_flow = f1.getString("flow")  # upstream
+            f2_flow = f2.getString("flow")  # both
 
             def opposite(flow_str):
                 return ee.String(ee.Algorithms.If(flow_str.equals("upstream"), "downstream", "upstream"))
@@ -475,39 +627,41 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             downstream_others1 = classified_rest1.filter(ee.Filter.eq("flow_part", "downstream_flow"))
             unclassified_others1 = classified_rest1.filter(ee.Filter.eq("flow_part", "unclassified"))
 
-            upstreamWaterway = ee.FeatureCollection([ee.Feature(upstream_line)]).merge(upstream_others1)
-            downstreamWaterway = ee.FeatureCollection([ee.Feature(downstream_line)]).merge(downstream_others1)
+            upstream_waterway = ee.FeatureCollection([ee.Feature(upstream_line)]).merge(upstream_others1)
+            downstream_waterway = ee.FeatureCollection([ee.Feature(downstream_line)]).merge(downstream_others1)
 
-            classified_rest2 = unclassified_others1.map(lambda f: classify_flowline(f, upstreamWaterway, downstreamWaterway))
+            classified_rest2 = unclassified_others1.map(
+                lambda f: classify_flowline(f, upstream_waterway, downstream_waterway)
+            )
 
             upstream_others2 = classified_rest2.filter(ee.Filter.eq("flow_part", "upstream_flow"))
             downstream_others2 = classified_rest2.filter(ee.Filter.eq("flow_part", "downstream_flow"))
             unclassified_others2 = classified_rest2.filter(ee.Filter.eq("flow_part", "unclassified"))
 
-            upstreamWaterway2 = upstream_others2.merge(upstreamWaterway)
-            downstreamWaterway2 = downstream_others2.merge(downstreamWaterway)
+            upstream_waterway2 = upstream_others2.merge(upstream_waterway)
+            downstream_waterway2 = downstream_others2.merge(downstream_waterway)
 
             classified_rest3 = unclassified_others2.map(
-                lambda f: classify_flowline(f, upstreamWaterway2, downstreamWaterway2)
+                lambda f: classify_flowline(f, upstream_waterway2, downstream_waterway2)
             )
 
             upstream_others3 = classified_rest3.filter(ee.Filter.eq("flow_part", "upstream_flow"))
             downstream_others3 = classified_rest3.filter(ee.Filter.eq("flow_part", "downstream_flow"))
 
-            upstreamWaterway3 = upstream_others3.merge(upstreamWaterway2)
-            downstreamWaterway3 = downstream_others3.merge(downstreamWaterway2)
+            upstream_waterway3 = upstream_others3.merge(upstream_waterway2)
+            downstream_waterway3 = downstream_others3.merge(downstream_waterway2)
 
             # 6) DISSOLVE EACH GROUP INTO SINGLE GEOMETRIES
-            upstreamGeometry = upstreamWaterway3.geometry().dissolve()
-            downstreamGeometry = downstreamWaterway3.geometry().dissolve()
+            upstream_geometry = upstream_waterway3.geometry().dissolve()
+            downstream_geometry = downstream_waterway3.geometry().dissolve()
 
             # 7) BUFFER & MASK ELEVATION
-            bufferDist = 100  # meters
-            upstreamBuffered = upstreamGeometry.buffer(bufferDist)
-            downstreamBuffered = downstreamGeometry.buffer(bufferDist)
+            buffer_dist = 100  # meters
+            upstream_buffered = upstream_geometry.buffer(buffer_dist)
+            downstream_buffered = downstream_geometry.buffer(buffer_dist)
 
-            upstream_mask_img = ee.Image.constant(1).clip(upstreamBuffered)
-            downstream_mask_img = ee.Image.constant(1).clip(downstreamBuffered)
+            upstream_mask_img = ee.Image.constant(1).clip(upstream_buffered)
+            downstream_mask_img = ee.Image.constant(1).clip(downstream_buffered)
 
             # Create inverse masks using downstream_half and upstream_half geometries
             downstream_half_mask = ee.Image.constant(0).paint(downstream_half, 1)
@@ -524,85 +678,88 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
             downstream_rename = downstream_elev_mask.rename("downstream")
             upstream_rename = upstream_elev_mask.rename("upstream")
             # Add bands, create new "id" property to name the file, and clip the images to the ROI
-            # Full_image = image.set("First_id", ee.String(damId).cat("_").cat(DamStatus).cat("_S2id:_").cat(index).cat("_").cat(DamDate).cat("_intersect_").cat(intersect))\
-            Full_image = (
+            full_image = (
                 image.set(
                     "First_id",
-                    ee.String(damId)
+                    ee.String(dam_id)
                     .cat("_")
-                    .cat(DamStatus)
+                    .cat(dam_status)
                     .cat("_S2id:_")
                     .cat(index)
                     .cat("_")
-                    .cat(DamDate)
+                    .cat(dam_date)
                     .cat("_intersect_"),
                 )
-                .set("Dam_id", damId)
-                .set("Dam_status", DamStatus)
+                .set("Dam_id", dam_id)
+                .set("Dam_status", dam_status)
                 .set("Image_month", image_month)
                 .set("Image_year", image_year)
-                .set("Area", boxArea)
-                .clip(boxArea)
+                .set("Area", box_area)
+                .clip(box_area)
             )
             # .addBands(upstream_elev_mask).addBands(downstream_elev_mask)
-            return Full_image.addBands(downstream_rename).addBands(upstream_rename).addBands(elevation_masked2)
+            return full_image.addBands(downstream_rename).addBands(upstream_rename).addBands(elevation_masked2)
 
-        filteredCollection2 = filteredCollection.map(add_band)
+        filtered_collection2 = filtered_collection.map(add_band)
 
         def calculate_cloud_coverage(image):
             cloud = image.select("S2_Binary_cloudMask")
 
             # Compute cloud coverage percentage using a simpler approach
-            cloud_stats = cloud.reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e9)
+            cloud_stats = cloud.reduceRegion(
+                reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e9
+            )
 
             clear_coverage_percentage = ee.Number(cloud_stats.get("S2_Binary_cloudMask")).multiply(100).round()
             cloud_coverage_percentage = ee.Number(100).subtract(clear_coverage_percentage)  # Invert the percentage
 
             return image.set("Cloud_coverage", cloud_coverage_percentage)
 
-        filteredCloudCollection = filteredCollection2.map(calculate_cloud_coverage)
-        # filteredCollection_overlap = filteredCloudCollection.filterMetadata('intersection_ratio', 'greater_than', 0.95)
+        filtered_cloud_collection = filtered_collection2.map(calculate_cloud_coverage)
+        # filteredCollection_overlap = filtered_cloud_collection.filterMetadata('intersection_ratio',
+        # 'greater_than', 0.95)
 
         # Group by month and get the least cloudy image for each month
-        def get_monthly_least_cloudy_images(Collection):
+        def get_monthly_least_cloudy_images(collection):
             months = ee.List.sequence(1, 12)
 
             def get_month_image(month):
-                monthly_images = Collection.filter(ee.Filter.calendarRange(month, month, "month"))
+                monthly_images = collection.filter(ee.Filter.calendarRange(month, month, "month"))
                 return ee.Image(monthly_images.sort("CLOUDY_PIXEL_PERCENTAGE").first())
 
             monthly_images_list = months.map(get_month_image)
             monthly_images_collection = ee.ImageCollection.fromImages(monthly_images_list)
             return monthly_images_collection
 
-        # filteredCollectionBands = get_monthly_least_cloudy_images(filteredCollection_overlap)
-        filteredCollectionBands = get_monthly_least_cloudy_images(filteredCloudCollection)
+        # filtered_collection_bands = get_monthly_least_cloudy_images(filteredCollection_overlap)
+        filtered_collection_bands = get_monthly_least_cloudy_images(filtered_cloud_collection)
 
-        def addCloud(image):
-            id = image.get("First_id")
-            cloud = image.get("Cloud_coverage")
-            Complete_id = image.set("Full_id", ee.String(id).cat("_Cloud_").cat(cloud))
-            return Complete_id
+        complete_collection = filtered_collection_bands.map(_add_cloud_coverage_to_id)
 
-        Complete_collection = filteredCollectionBands.map(addCloud)
+        return complete_collection
 
-        return Complete_collection
-
-    ImageryCollections = Dam_Collection.map(extract_pixels).flatten()
-    return ee.ImageCollection(ImageryCollections)
+    imagery_collections = dam_collection.map(extract_pixels).flatten()
+    return ee.ImageCollection(imagery_collections)
 
 
-############# Functions to compute metrics
-##### Compute LST
-def compute_lst(s2_image, landsat_col, boxArea):
-    """Computes LST from the median of the filtered Landsat collection."""
-    median_img = landsat_col.median().clip(boxArea)
+def _add_cloud_coverage_to_id(image: ee.Image) -> ee.Image:
+    """Add cloud coverage percentage to the image identifier."""
+    first_id: ee.ComputedObject = image.get("First_id")
+    cloud_coverage: ee.ComputedObject = image.get("Cloud_coverage")
+    return image.set("Full_id", ee.String(first_id).cat("_Cloud_").cat(cloud_coverage))
+
+
+def compute_lst(landsat_col, box_area):
+    """
+    Computes LST from the median of the filtered Landsat collection.
+    """
+    median_img = landsat_col.median().clip(box_area)
 
     # Compute NDVI again, just to get min/max
     ndvi = median_img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
 
     # Compute NDVI min/max
-    ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=boxArea, scale=30, maxPixels=1e13)
+    ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=box_area, scale=30, maxPixels=1e13)
 
     ndvi_min = ee.Number(ee.Algorithms.If(ndvi_dict.contains("NDVI_min"), ndvi_dict.get("NDVI_min"), 0))
     ndvi_max = ee.Number(ee.Algorithms.If(ndvi_dict.contains("NDVI_max"), ndvi_dict.get("NDVI_max"), 0))
@@ -617,15 +774,13 @@ def compute_lst(s2_image, landsat_col, boxArea):
     thermal = median_img.select("ST_B10").rename("thermal")
 
     # Compute LST in °C
-    lst = thermal.expression("(TB / (1 + (0.00115 * (TB / 1.438)) * log(em))) - 273.15", {"TB": thermal, "em": em}).rename(
-        "LST"
-    )
+    lst = thermal.expression(
+        "(TB / (1 + (0.00115 * (TB / 1.438)) * log(em))) - 273.15", {"TB": thermal, "em": em}
+    ).rename("LST")
 
     return lst
 
 
-############# Functions to add additional datasets- Landsat LST, OPEN-ET ET
-##### JUST LST
 def add_landsat_lst(s2_image):
     """
     For each Sentinel-2 image:
@@ -633,33 +788,36 @@ def add_landsat_lst(s2_image):
     2) Filter Landsat images in that same date range.
     3) Compute median LST over the geometry.
     4) Return the original S2 image with an added LST band (or 0 if none found).
+
+    Functions to add additional datasets- Landsat LST, OPEN-ET ET
+    JUST LST
     """
     year = ee.Number(s2_image.get("Image_year"))
     month = ee.Number(s2_image.get("Image_month"))
 
     start_date = ee.Date.fromYMD(year, month, ee.Number(1))
     end_date = start_date.advance(1, "month")
-    boxArea = s2_image.get("Area")  # This is assumed to be some geometry on your image properties
+    box_area = s2_image.get("Area")  # This is assumed to be some geometry on your image properties
 
     # Function to apply scaling factors
     def apply_scale_factors(image):
-        opticalBands = image.select("SR_B.").multiply(0.0000275).add(-0.2)
-        thermalBands = image.select("ST_B.*").multiply(0.00341802).add(149.0)
-        return image.addBands(opticalBands, overwrite=True).addBands(thermalBands, overwrite=True)
+        optical_bands = image.select("SR_B.").multiply(0.0000275).add(-0.2)
+        thermal_bands = image.select("ST_B.*").multiply(0.00341802).add(149.0)
+        return image.addBands(optical_bands, overwrite=True).addBands(thermal_bands, overwrite=True)
 
     # Function to mask clouds
     def cloud_mask(image):
-        cloudShadowBitmask = 1 << 3
-        cloudBitmask = 1 << 5
+        cloud_shadow_bitmask = 1 << 3
+        cloud_bitmask = 1 << 5
         qa = image.select("QA_PIXEL")
-        mask = qa.bitwiseAnd(cloudShadowBitmask).eq(0).And(qa.bitwiseAnd(cloudBitmask).eq(0))
+        mask = qa.bitwiseAnd(cloud_shadow_bitmask).eq(0).And(qa.bitwiseAnd(cloud_bitmask).eq(0))
         return image.updateMask(mask)
 
     # Build the Landsat collection
     landsat_col = (
         ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
         .filterDate(start_date, end_date)
-        .filterBounds(boxArea)
+        .filterBounds(box_area)
         .map(apply_scale_factors)
         .map(cloud_mask)
     )
@@ -667,7 +825,7 @@ def add_landsat_lst(s2_image):
     # Compute NDVI stats on each image to ensure we only keep valid images
     def add_ndvi_stats(img):
         ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
-        ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=boxArea, scale=30, maxPixels=1e13)
+        ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=box_area, scale=30, maxPixels=1e13)
         return img.setMulti(ndvi_dict)
 
     landsat_col = landsat_col.map(add_ndvi_stats)
@@ -675,10 +833,12 @@ def add_landsat_lst(s2_image):
     collection_size = filtered_col.size()
 
     # If no valid images, we return an empty LST band with 0
-    empty_image = ee.Image.constant(0).rename(["LST"]).clip(boxArea)
+    empty_image = ee.Image.constant(0).rename(["LST"]).clip(box_area)
 
     lst_image = ee.Algorithms.If(
-        collection_size.eq(0), empty_image, compute_lst(s2_image, filtered_col, boxArea)  # 0 LST if no valid Landsat images
+        collection_size.eq(0),
+        empty_image,
+        compute_lst(filtered_col, box_area),  # 0 LST if no valid Landsat images
     )
 
     lst_image = ee.Image(lst_image)
@@ -696,14 +856,14 @@ def add_landsat_lst_et(s2_image):
     start_date = ee.Date.fromYMD(year, month, 1)
     end_date = start_date.advance(1, "month")
 
-    boxArea = s2_image.geometry()
+    box_area = s2_image.geometry()
     # st.write(f"DEBUG: Processing area for year")
 
-    ## STEP 1: PROCESS LANDSAT FOR LST
+    # STEP 1: PROCESS LANDSAT FOR LST
     def apply_scale_factors(image):
-        opticalBands = image.select("SR_B.").multiply(0.0000275).add(-0.2)
-        thermalBands = image.select("ST_B.*").multiply(0.00341802).add(149.0)
-        return image.addBands(opticalBands, overwrite=True).addBands(thermalBands, overwrite=True)
+        optical_bands = image.select("SR_B.").multiply(0.0000275).add(-0.2)
+        thermal_bands = image.select("ST_B.*").multiply(0.00341802).add(149.0)
+        return image.addBands(optical_bands, overwrite=True).addBands(thermal_bands, overwrite=True)
 
     def cloud_mask(image):
         qa = image.select("QA_PIXEL")
@@ -714,7 +874,7 @@ def add_landsat_lst_et(s2_image):
     landsat_col = (
         ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
         .filterDate(start_date, end_date)
-        .filterBounds(boxArea)
+        .filterBounds(box_area)
         .map(apply_scale_factors)
         .map(cloud_mask)
     )
@@ -723,7 +883,7 @@ def add_landsat_lst_et(s2_image):
 
     def add_ndvi_stats(img):
         ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
-        ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=boxArea, scale=30, maxPixels=1e13)
+        ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=box_area, scale=30, maxPixels=1e13)
         return img.setMulti(ndvi_dict)
 
     # st.write("DEBUG: Adding NDVI stats")
@@ -733,12 +893,12 @@ def add_landsat_lst_et(s2_image):
     # st.write(f"DEBUG: Filtered collection size")
 
     # Robust LST calculation handling special cases
-    def robust_compute_lst(filtered_col, boxArea):
+    def robust_compute_lst(filtered_col, box_area):
         def lst_from_image(img):
             # st.write("DEBUG: Computing LST from single image")
             ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
             # st.write("DEBUG: Computing NDVI stats")
-            ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=boxArea, scale=30, maxPixels=1e13)
+            ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=box_area, scale=30, maxPixels=1e13)
 
             ndvi_min = ee.Number(ndvi_dict.get("NDVI_min"))
             ndvi_max = ee.Number(ndvi_dict.get("NDVI_max"))
@@ -773,92 +933,47 @@ def add_landsat_lst_et(s2_image):
         # st.write("DEBUG: Starting robust LST computation")
         lst_image = ee.Algorithms.If(
             filtered_col.size().eq(0),
-            ee.Image.constant(99).rename("LST").clip(boxArea),
+            ee.Image.constant(99).rename("LST").clip(box_area),
             ee.Algorithms.If(
                 filtered_col.size().eq(1),
-                lst_from_image(filtered_col.first().clip(boxArea)),
-                lst_from_image(filtered_col.median().clip(boxArea)),
+                lst_from_image(filtered_col.first().clip(box_area)),
+                lst_from_image(filtered_col.median().clip(box_area)),
             ),
         )
         return ee.Image(lst_image)
 
     # st.write("DEBUG: Computing LST image")
-    lst_image = robust_compute_lst(filtered_col, boxArea)
+    lst_image = robust_compute_lst(filtered_col, box_area)
 
-    ## STEP 2: PROCESS OPENET ET DATA
+    # STEP 2: PROCESS OPENET ET DATA
     # st.write("DEBUG: Processing OpenET data")
     et_collection = (
         ee.ImageCollection("OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0")
         .filterDate(start_date, end_date)
-        .filterBounds(boxArea)
+        .filterBounds(box_area)
     )
 
     # st.write(f"DEBUG: OpenET collection size")
     et_monthly = et_collection.mean().select("et_ensemble_mad").rename("ET")
 
     et_final = ee.Algorithms.If(
-        et_collection.size().eq(0), ee.Image.constant(99).rename("ET").clip(boxArea), et_monthly.clip(boxArea)
+        et_collection.size().eq(0), ee.Image.constant(99).rename("ET").clip(box_area), et_monthly.clip(box_area)
     )
 
     et_final = ee.Image(et_final)
 
-    ## STEP 3: ADD BANDS BACK TO SENTINEL-2 IMAGE
+    # STEP 3: ADD BANDS BACK TO SENTINEL-2 IMAGE
     # st.write("DEBUG: Adding bands back to Sentinel-2 image")
     return s2_image.addBands(lst_image).addBands(et_final).set("landsat_collection_size", collection_size)
 
 
-########### Functions to calculate means
-##### NDVI, LST
-def compute_all_metrics(image):
-    """
-    Returns an ee.Feature containing mean NDVI, NDWI_Green, and LST
-    for the geometry of interest.
-    """
-    # 1) Use the 'elevation' band (or any other reference band) to get geometry
-    elevation_mask = image.select("elevation")
-    geometry = elevation_mask.geometry()
-
-    # 2) Compute NDVI using Sentinel-2 Red & NIR
-    ndvi = image.normalizedDifference(["S2_NIR", "S2_Red"]).rename("NDVI")
-    ndvi_mean = ndvi.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get("NDVI")
-
-    # 3) Compute NDWI_Green using Sentinel-2 Green & NIR
-    ndwi_green = image.normalizedDifference(["S2_Green", "S2_NIR"]).rename("NDWI_Green")
-    ndwi_green_mean = ndwi_green.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get(
-        "NDWI_Green"
-    )
-
-    # 4) Select LST band (added by add_landsat_lst)
-    lst_band = image.select("LST")
-    lst_mean = lst_band.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get("LST")
-
-    # 5) Extract metadata (month, year, dam status, etc.)
-    month = image.get("Image_month")
-    status = image.get("Dam_status")
-    year = image.get("Image_year")
-
-    # Combine all metrics & metadata into a dictionary
-    combined_metrics = ee.Dictionary(
-        {
-            "NDVI": ndvi_mean,
-            "NDWI_Green": ndwi_green_mean,
-            "LST": lst_mean,
-            "Image_month": month,
-            "Image_year": year,
-            "Dam_status": status,
-        }
-    )
-
-    # Return as an ee.Feature
-    return ee.Feature(None, combined_metrics)
-
-
-####### Compute ET and include upstream and downstream
-##### NDVI, LST, ET
-def compute_all_metrics_LST_ET(image):
+def compute_all_metrics_lst_et(image) -> ee.Feature:
     """
     Returns an ee.Feature containing mean NDVI, NDWI_Green, LST, and ET
     for the geometry of interest.
+
+    Compute ET and include upstream and downstream
+    NDVI, LST, ET
     """
     # 1) Use the 'elevation' band (or any other reference band) to get geometry
     elevation_mask = image.select("elevation")
@@ -870,9 +985,9 @@ def compute_all_metrics_LST_ET(image):
 
     # 3) Compute NDWI_Green using Sentinel-2 Green & NIR
     ndwi_green = image.normalizedDifference(["S2_Green", "S2_NIR"]).rename("NDWI_Green")
-    ndwi_green_mean = ndwi_green.reduceRegion(reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13).get(
-        "NDWI_Green"
-    )
+    ndwi_green_mean = ndwi_green.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=geometry, scale=30, maxPixels=1e13
+    ).get("NDWI_Green")
 
     # 4) Select LST band (added by add_landsat_lst_et)
     lst_band = image.select("LST")
@@ -902,39 +1017,7 @@ def compute_all_metrics_LST_ET(image):
         }
     )
 
-    # Return as an ee.Feature
     return ee.Feature(None, combined_metrics)
-
-
-###### Upstream and downstream
-def extract_coordinates_df(dam_data):
-    """
-    Extract coordinates from dam data and return a DataFrame with id_property and coordinates.
-    """
-    try:
-        # Extract features from dam_data
-        features = dam_data.getInfo()["features"]
-
-        # Create a list to store coordinates
-        coords_data = []
-
-        for feature in features:
-            properties = feature["properties"]
-            id_property = properties.get("id_property")
-            point_geo = properties.get("Point_geo")
-
-            if point_geo:
-                # Extract coordinates from Point_geo
-                coords = point_geo["coordinates"]
-                coords_data.append({"id_property": id_property, "longitude": coords[0], "latitude": coords[1]})
-
-        # Convert to DataFrame
-        coords_df = pd.DataFrame(coords_data)
-        return coords_df
-
-    except Exception as e:
-        st.warning(f"Error extracting coordinates: {str(e)}")
-        return pd.DataFrame(columns=["id_property", "longitude", "latitude"])
 
 
 def compute_all_metrics_up_downstream(image):
@@ -945,19 +1028,14 @@ def compute_all_metrics_up_downstream(image):
     upstream_mask = image.select("upstream")
     downstream_mask = image.select("downstream")
 
-    # Check if bands exist
-    valid_up = upstream_mask.reduceRegion(
-        reducer=ee.Reducer.count(), geometry=image.geometry(), scale=10, maxPixels=1e13
-    ).getNumber("upstream")
-
     # 2) Compute NDVI using Sentinel-2 Red & NIR
     ndvi = image.normalizedDifference(["S2_NIR", "S2_Red"]).rename("NDVI")
 
     # Upstream NDVI
     ndvi_up_img = ndvi.updateMask(upstream_mask)
-    ndvi_up = ndvi_up_img.reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e13).get(
-        "NDVI"
-    )
+    ndvi_up = ndvi_up_img.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e13
+    ).get("NDVI")
 
     # Downstream NDVI
     ndvi_down_img = ndvi.updateMask(downstream_mask)
@@ -970,9 +1048,9 @@ def compute_all_metrics_up_downstream(image):
 
     # Upstream NDWI
     ndwi_up_img = ndwi_green.updateMask(upstream_mask)
-    ndwi_up = ndwi_up_img.reduceRegion(reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e13).get(
-        "NDWI_Green"
-    )
+    ndwi_up = ndwi_up_img.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=image.geometry(), scale=10, maxPixels=1e13
+    ).get("NDWI_Green")
 
     # Downstream NDWI
     ndwi_down_img = ndwi_green.updateMask(downstream_mask)

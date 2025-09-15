@@ -4,6 +4,7 @@ Earth Engine Authentication Module
 Centralized authentication for Google Earth Engine to eliminate code duplication
 across the application.
 """
+
 import os
 
 import ee
@@ -37,13 +38,30 @@ def get_credentials():
         credentials_info, scopes=["https://www.googleapis.com/auth/earthengine"]
     )
 
+
 def load_local_config():
     """Load local development configuration"""
     config_path = "config.yaml"
     if os.path.exists(config_path):
-        with open(config_path, 'r') as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
     return None
+
+
+def is_earth_engine_initialized():
+    """
+    Check if Google Earth Engine is already initialized.
+
+    Tests with a simple Earth Engine operation that will succeed if EE is initialized and fail if not.
+
+    Returns:
+        bool: True if Earth Engine is initialized, False otherwise.
+    """
+    try:
+        ee.Number(1).getInfo()
+        return True
+    except Exception:  # pylint: disable=broad-except
+        return False
 
 
 def initialize_earth_engine():
@@ -54,13 +72,18 @@ def initialize_earth_engine():
     including credential retrieval and project setup.
     """
 
+    # Check if Earth Engine is already initialized
+    if is_earth_engine_initialized():
+        # st.info("Earth Engine is already initialized")
+        return
+
     try:
         credentials = get_credentials()
         ee.Initialize(credentials, project="ee-beaver-lab")
         st.success("Earth Engine initialized with service account")
     except (KeyError, FileNotFoundError):
         config = load_local_config()
-        if not config or not config.get('development', {}).get('earth_engine', {}).get('project_id'):
+        if not config or not config.get("development", {}).get("earth_engine", {}).get("project_id"):
             st.error("Local development requires config.yaml with your Earth Engine project ID")
             st.error("1. Copy config.yaml.example to config.yaml")
             st.error("2. Update the project_id with your GCP Project ID")
@@ -69,7 +92,7 @@ def initialize_earth_engine():
         # Fallback to user authentication (for local development)
         try:
             ee.Authenticate()
-            project_id = config['development']['earth_engine']['project_id']
+            project_id = config["development"]["earth_engine"]["project_id"]
             ee.Initialize(project=project_id)
             st.success("Earth Engine initialized with user authentication (local mode)")
         except Exception as e:  # pylint: disable=broad-except

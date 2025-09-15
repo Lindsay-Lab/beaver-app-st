@@ -5,15 +5,15 @@ import pandas as pd
 import seaborn as sns
 import streamlit as st
 
-from service.Data_management import add_dam_buffer_and_standardize_date
 from service.earth_engine_auth import initialize_earth_engine
-from service.Negative_sample_functions import deduplicate_locations, prepareHydro, sampleNegativePoints
-from service.Parser import upload_points_to_ee
-from service.Visualize_trends import (
-    S2_Export_for_visual,
-    S2_Export_for_visual_flowdir,
+from service.load_datasets import load_nhd_collections
+from service.negative_sampling import deduplicate_locations, prepare_hydro, sample_negative_points
+from service.parser import upload_points_to_ee
+from service.visualize_trends import (
+    s2_export_for_visual,
+    s2_export_for_visual_flowdir,
     add_landsat_lst_et,
-    compute_all_metrics_LST_ET,
+    compute_all_metrics_lst_et,
     compute_all_metrics_up_downstream,
 )
 
@@ -62,67 +62,8 @@ if "Positive_collection" in st.session_state:
                 st.session_state["Positive_dam_state"] = states_with_dams
                 states_geo = st.session_state["Positive_dam_state"]
                 state_names = states_geo.aggregate_array("NAME").getInfo()
-                state_initials = {
-                    "Alabama": "AL",
-                    "Alaska": "AK",
-                    "Arizona": "AZ",
-                    "Arkansas": "AR",
-                    "California": "CA",
-                    "Colorado": "CO",
-                    "Connecticut": "CT",
-                    "Delaware": "DE",
-                    "Florida": "FL",
-                    "Georgia": "GA",
-                    "Hawaii": "HI",
-                    "Idaho": "ID",
-                    "Illinois": "IL",
-                    "Indiana": "IN",
-                    "Iowa": "IA",
-                    "Kansas": "KS",
-                    "Kentucky": "KY",
-                    "Louisiana": "LA",
-                    "Maine": "ME",
-                    "Maryland": "MD",
-                    "Massachusetts": "MA",
-                    "Michigan": "MI",
-                    "Minnesota": "MN",
-                    "Mississippi": "MS",
-                    "Missouri": "MO",
-                    "Montana": "MT",
-                    "Nebraska": "NE",
-                    "Nevada": "NV",
-                    "New Hampshire": "NH",
-                    "New Jersey": "NJ",
-                    "New Mexico": "NM",
-                    "New York": "NY",
-                    "North Carolina": "NC",
-                    "North Dakota": "ND",
-                    "Ohio": "OH",
-                    "Oklahoma": "OK",
-                    "Oregon": "OR",
-                    "Pennsylvania": "PA",
-                    "Rhode Island": "RI",
-                    "South Carolina": "SC",
-                    "South Dakota": "SD",
-                    "Tennessee": "TN",
-                    "Texas": "TX",
-                    "Utah": "UT",
-                    "Vermont": "VT",
-                    "Virginia": "VA",
-                    "Washington": "WA",
-                    "West Virginia": "WV",
-                    "Wisconsin": "WI",
-                    "Wyoming": "WY",
-                }
 
-                nhd_collections = []
-                for state in state_names:
-                    state_initial = state_initials.get(state)
-                    if state_initial:
-                        nhd_dataset = ee.FeatureCollection(
-                            f"projects/sat-io/open-datasets/NHD/NHD_{state_initial}/NHDFlowline"
-                        )
-                        nhd_collections.append(nhd_dataset)
+                nhd_collections = load_nhd_collections(state_names)
 
                 merged_nhd = ee.FeatureCollection(nhd_collections).flatten()
                 st.session_state.selected_waterway = merged_nhd
@@ -139,11 +80,13 @@ if "Positive_collection" in st.session_state:
 
                 # Convert waterway feature collection to raster
                 waterway_fc = st.session_state.selected_waterway
-                hydroRaster = prepareHydro(waterway_fc)
+                hydroRaster = prepare_hydro(waterway_fc)
 
                 # Sample negative points
-                negativePoints = sampleNegativePoints(positive_dams_fc, hydroRaster, innerRadius, outerRadius, 10)
-                negativePoints = negativePoints.map(lambda feature: feature.set("Dam", "negative").set("date", full_date))
+                negativePoints = sample_negative_points(positive_dams_fc, hydroRaster, innerRadius, outerRadius, 10)
+                negativePoints = negativePoints.map(
+                    lambda feature: feature.set("Dam", "negative").set("date", full_date)
+                )
 
                 fc = negativePoints
                 features_list = fc.toList(fc.size())
@@ -156,7 +99,9 @@ if "Positive_collection" in st.session_state:
 
                 Neg_points_id = ee.FeatureCollection(indices.map(set_id_negatives2))
 
-                Pos_collection = st.session_state.Positive_collection.map(lambda feature: feature.set("Dam", "positive"))
+                Pos_collection = st.session_state.Positive_collection.map(
+                    lambda feature: feature.set("Dam", "positive")
+                )
 
                 pos_features_list = Pos_collection.toList(Pos_collection.size())
                 pos_indices = ee.List.sequence(0, Pos_collection.size().subtract(1))
@@ -241,8 +186,8 @@ if st.session_state["Dam_data"]:
                 for i in range(num_batches):
                     batch = dam_list.slice(i * batch_size, min(total_count, (i + 1) * batch_size))
                     dam_batch = ee.FeatureCollection(batch)
-                    S2_IC_batch = S2_Export_for_visual(dam_batch)
-                    results_batch = S2_IC_batch.map(add_landsat_lst_et).map(compute_all_metrics_LST_ET)
+                    S2_IC_batch = s2_export_for_visual(dam_batch)
+                    results_batch = S2_IC_batch.map(add_landsat_lst_et).map(compute_all_metrics_lst_et)
                     df_batch = geemap.ee_to_df(ee.FeatureCollection(results_batch))
                     df_list.append(df_batch)
                     progress_bar.progress((i + 1) / num_batches)
@@ -298,7 +243,7 @@ if st.session_state["Dam_data"]:
                 for i in range(num_batches):
                     batch = dam_list.slice(i * batch_size, min(total_count, (i + 1) * batch_size))
                     dam_batch = ee.FeatureCollection(batch)
-                    S2_IC_batch = S2_Export_for_visual_flowdir(dam_batch, waterway_fc)
+                    S2_IC_batch = s2_export_for_visual_flowdir(dam_batch, waterway_fc)
                     results_batch = S2_IC_batch.map(add_landsat_lst_et).map(compute_all_metrics_up_downstream)
                     df_batch = geemap.ee_to_df(ee.FeatureCollection(results_batch))
                     df_list.append(df_batch)

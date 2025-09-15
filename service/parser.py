@@ -1,7 +1,11 @@
+"""
+Utilities for parsing inputs into appropriate formats.
+"""
+
 import csv
 import json
+from io import StringIO
 
-import dateutil
 import ee
 import pandas as pd
 import streamlit as st
@@ -9,32 +13,6 @@ import streamlit as st
 from .earth_engine_auth import initialize_earth_engine
 
 initialize_earth_engine()
-
-
-def set_id_year_property(feature):
-    try:
-        # Ensure feature has an ID; default to "unknown" if not present
-        feature_id = feature.id() if feature.id() else "unknown"
-
-        # Convert Earth Engine String to Python string for processing
-        feature_id = feature_id.getInfo() if isinstance(feature_id, ee.ComputedObject) else feature_id
-
-        # Extract the last two characters safely
-        short_id = feature_id[-2:] if isinstance(feature_id, str) and len(feature_id) >= 2 else "NA"
-
-        # Safely get the year from the date property
-        date = feature.get("date")
-        year = ee.Date(date).get("year").getInfo() if date else None
-
-        # Add the new properties
-        return feature.set("id_property", feature_id).set("year", year).set("DamID", short_id)
-    except Exception as e:
-        st.error(f"An error occurred during standardization: {e}")
-        return feature  # Return the original feature if an error occurs
-
-
-# TODO: Add a function to easily upload points to Earth Engine
-# The format is slightly different in Jupyter notebook because it doesn't deal with streamlit syntax
 
 
 def clean_coordinate(value):
@@ -47,21 +25,10 @@ def clean_coordinate(value):
         return None  # Return None if the value cannot be converted
 
 
-def parse_date(value, date_format):
-    """Parses a date value into a standardized YYYY-MM-DD format."""
-    try:
-        if date_format == "Auto Detect":
-            return dateutil.parser.parse(str(value)).strftime("%Y-%m-%d")
-        elif date_format == "Unix Timestamp":
-            return pd.to_datetime(int(value), unit="s").strftime("%Y-%m-%d")
-        else:
-            return pd.to_datetime(value, format=date_format).strftime("%Y-%m-%d")
-    except Exception:
-        return None  # Return None if the date cannot be parsed
-
-
-# Modified parser to include widgit_prefix and autodetect header
-def upload_points_to_ee(file, widget_prefix=""):
+def upload_points_to_ee(file: StringIO, widget_prefix:str="") -> ee.FeatureCollection | None:
+    """
+    Modified parser to include widget_prefix and autodetect header
+    """
     if not file:
         return None
 
@@ -178,7 +145,7 @@ def upload_points_to_ee(file, widget_prefix=""):
                         props = feature_obj.get("properties", {"id": i})
                         props["date"] = selected_date  # Add the selected date to the properties
                         features.append(ee.Feature(ee.Geometry(geom), props))
-                    except Exception as e:
+                    except Exception as e:  # pylint: disable=broad-except
                         st.warning(f"Skipped feature {i} due to an error: {e}")
 
                 feature_collection = ee.FeatureCollection(features)
@@ -189,7 +156,7 @@ def upload_points_to_ee(file, widget_prefix=""):
             st.error("Unsupported file format. Please upload a CSV or GeoJSON file.")
             return None
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         st.error(f"An error occurred while processing the file: {e}")
         return None
 
@@ -218,7 +185,7 @@ def upload_non_dam_points_to_ee(file, dam_date=None, widget_prefix=""):
                 dam_date = first_feature.get("date").getInfo()
                 if not dam_date:
                     dam_date = "2020-07-01"  # Default date
-            except:
+            except Exception:  # pylint: disable=broad-except
                 dam_date = "2020-07-01"  # Default date
         else:
             dam_date = "2020-07-01"  # Default date
@@ -322,7 +289,7 @@ def upload_non_dam_points_to_ee(file, dam_date=None, widget_prefix=""):
                         props = feature_obj.get("properties", {"id": i})
                         props["date"] = dam_date  # Use the dam date for all features
                         features.append(ee.Feature(ee.Geometry(geom), props))
-                    except Exception as e:
+                    except Exception as e:  # pylint: disable=broad-except
                         st.warning(f"Skipped feature {i} due to an error: {e}")
 
                 feature_collection = ee.FeatureCollection(features)
@@ -333,6 +300,58 @@ def upload_non_dam_points_to_ee(file, dam_date=None, widget_prefix=""):
             st.error("Unsupported file format. Please upload a CSV or GeoJSON file.")
             return None
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         st.error(f"An error occurred while processing the file: {e}")
         return None
+
+
+def extract_coordinates_df(dam_data):
+    """
+    Extract coordinates from Dam_data and create a DataFrame with id_property and coordinates
+
+    Args:
+        dam_data: Earth Engine Feature Collection containing dam data
+
+    Returns:
+        DataFrame with id_property, longitude, and latitude columns
+    """
+    try:
+        # Get features from Dam_data
+        dam_features = dam_data.getInfo()["features"]
+
+        coords_data = []
+        for i, feature in enumerate(dam_features):
+            try:
+                props = feature["properties"]
+                id_prop = props.get("id_property")
+
+                if not id_prop:
+                    st.warning(f"Feature {i} missing id_property")
+                    continue
+
+                # Extract coordinates from Point_geo
+                if "Point_geo" in props:
+                    point_geo = props["Point_geo"]
+
+                    if isinstance(point_geo, dict) and "coordinates" in point_geo:
+                        coords = point_geo["coordinates"]
+                        if isinstance(coords, list) and len(coords) >= 2:
+                            coords_data.append({"id_property": id_prop, "longitude": coords[0], "latitude": coords[1]})
+                        else:
+                            st.warning(f"Invalid coordinates format for feature {i}: {coords}")
+                    else:
+                        st.warning(f"Point_geo missing coordinates for feature {i}")
+                else:
+                    st.warning(f"No Point_geo found for feature {i}")
+
+            except Exception as e:
+                st.warning(f"Error processing feature {i}: {str(e)}")
+                continue
+
+        # Create DataFrame from coordinates data
+        coords_df = pd.DataFrame(coords_data)
+
+        return coords_df
+    except Exception as e:
+        st.warning(f"Could not extract coordinates: {str(e)}")
+        return pd.DataFrame(columns=["id_property", "longitude", "latitude"])
