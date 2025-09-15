@@ -303,3 +303,55 @@ def upload_non_dam_points_to_ee(file, dam_date=None, widget_prefix=""):
     except Exception as e:  # pylint: disable=broad-except
         st.error(f"An error occurred while processing the file: {e}")
         return None
+
+
+def extract_coordinates_df(dam_data):
+    """
+    Extract coordinates from Dam_data and create a DataFrame with id_property and coordinates
+
+    Args:
+        dam_data: Earth Engine Feature Collection containing dam data
+
+    Returns:
+        DataFrame with id_property, longitude, and latitude columns
+    """
+    try:
+        # Get features from Dam_data
+        dam_features = dam_data.getInfo()["features"]
+
+        coords_data = []
+        for i, feature in enumerate(dam_features):
+            try:
+                props = feature["properties"]
+                id_prop = props.get("id_property")
+
+                if not id_prop:
+                    st.warning(f"Feature {i} missing id_property")
+                    continue
+
+                # Extract coordinates from Point_geo
+                if "Point_geo" in props:
+                    point_geo = props["Point_geo"]
+
+                    if isinstance(point_geo, dict) and "coordinates" in point_geo:
+                        coords = point_geo["coordinates"]
+                        if isinstance(coords, list) and len(coords) >= 2:
+                            coords_data.append({"id_property": id_prop, "longitude": coords[0], "latitude": coords[1]})
+                        else:
+                            st.warning(f"Invalid coordinates format for feature {i}: {coords}")
+                    else:
+                        st.warning(f"Point_geo missing coordinates for feature {i}")
+                else:
+                    st.warning(f"No Point_geo found for feature {i}")
+
+            except Exception as e:
+                st.warning(f"Error processing feature {i}: {str(e)}")
+                continue
+
+        # Create DataFrame from coordinates data
+        coords_df = pd.DataFrame(coords_data)
+
+        return coords_df
+    except Exception as e:
+        st.warning(f"Could not extract coordinates: {str(e)}")
+        return pd.DataFrame(columns=["id_property", "longitude", "latitude"])

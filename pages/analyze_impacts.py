@@ -12,7 +12,8 @@ from service.constants import AppConstants
 from service.earth_engine_auth import initialize_earth_engine
 from service.load_datasets import load_nhd_collections
 from service.negative_sampling import prepare_hydro, sample_negative_points
-from service.parser import upload_non_dam_points_to_ee, upload_points_to_ee
+from service.parser import extract_coordinates_df, upload_non_dam_points_to_ee, upload_points_to_ee
+from service.session_state import SessionStateManager
 from service.validation import (
     check_waterway_intersection,
     generate_validation_report,
@@ -28,104 +29,8 @@ from service.visualize_trends import (
 )
 
 initialize_earth_engine()
+SessionStateManager.initialize()
 
-
-def extract_coordinates_df(dam_data):
-    """
-    Extract coordinates from Dam_data and create a DataFrame with id_property and coordinates
-
-    Args:
-        dam_data: Earth Engine Feature Collection containing dam data
-
-    Returns:
-        DataFrame with id_property, longitude, and latitude columns
-    """
-    try:
-        # Get features from Dam_data
-        dam_features = dam_data.getInfo()["features"]
-
-        coords_data = []
-        for i, feature in enumerate(dam_features):
-            try:
-                props = feature["properties"]
-                id_prop = props.get("id_property")
-
-                if not id_prop:
-                    st.warning(f"Feature {i} missing id_property")
-                    continue
-
-                # Extract coordinates from Point_geo
-                if "Point_geo" in props:
-                    point_geo = props["Point_geo"]
-
-                    if isinstance(point_geo, dict) and "coordinates" in point_geo:
-                        coords = point_geo["coordinates"]
-                        if isinstance(coords, list) and len(coords) >= 2:
-                            coords_data.append({"id_property": id_prop, "longitude": coords[0], "latitude": coords[1]})
-                        else:
-                            st.warning(f"Invalid coordinates format for feature {i}: {coords}")
-                    else:
-                        st.warning(f"Point_geo missing coordinates for feature {i}")
-                else:
-                    st.warning(f"No Point_geo found for feature {i}")
-
-            except Exception as e:
-                st.warning(f"Error processing feature {i}: {str(e)}")
-                continue
-
-        # Create DataFrame from coordinates data
-        coords_df = pd.DataFrame(coords_data)
-
-        return coords_df
-    except Exception as e:
-        st.warning(f"Could not extract coordinates: {str(e)}")
-        return pd.DataFrame(columns=["id_property", "longitude", "latitude"])
-
-
-# Initialize session state for questionnaire
-if "questionnaire_shown" not in st.session_state:
-    st.session_state.questionnaire_shown = False
-if "survey_clicked" not in st.session_state:
-    st.session_state.survey_clicked = False
-
-# Initialize session state variables
-if "Positive_collection" not in st.session_state:
-    st.session_state.Positive_collection = None
-if "buffer_radius" not in st.session_state:
-    st.session_state.buffer_radius = AppConstants.DEFAULT_BUFFER_RADIUS
-if "validation_complete" not in st.session_state:
-    st.session_state.validation_complete = False
-if "use_all_dams" not in st.session_state:
-    st.session_state.use_all_dams = True
-if "validation_step" not in st.session_state:
-    st.session_state.validation_step = "initial"
-if "show_non_dam_section" not in st.session_state:
-    st.session_state.show_non_dam_section = False
-if "buffer_complete" not in st.session_state:
-    st.session_state.buffer_complete = False
-if "Dam_data" not in st.session_state:
-    st.session_state.Dam_data = None
-if "Full_positive" not in st.session_state:
-    st.session_state.Full_positive = None
-if "selected_waterway" not in st.session_state:
-    st.session_state.selected_waterway = None
-if "dataset_loaded" not in st.session_state:
-    st.session_state.dataset_loaded = False
-if "validation_results" not in st.session_state:
-    st.session_state.validation_results = None
-if "buffers_created" not in st.session_state:
-    st.session_state.buffers_created = False
-if "Merged_collection" not in st.session_state:
-    st.session_state.Merged_collection = None
-if "visualization_complete" not in st.session_state:
-    st.session_state.visualization_complete = False
-if "df_lst" not in st.session_state:
-    st.session_state.df_lst = None
-if "fig" not in st.session_state:
-    st.session_state.fig = None
-for i in range(1, 7):
-    if f"step{i}_complete" not in st.session_state:
-        st.session_state[f"step{i}_complete"] = False
 
 if not st.session_state.questionnaire_shown:
     st.title("Beaver Impacts Feedback Survey")
