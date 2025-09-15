@@ -9,7 +9,7 @@ import seaborn as sns
 import streamlit as st
 
 from service.earth_engine_auth import initialize_earth_engine
-from service.negative_sampling import prepareHydro, sampleNegativePoints
+from service.negative_sampling import prepare_hydro, sample_negative_points
 from service.parser import upload_non_dam_points_to_ee, upload_points_to_ee
 from service.validation import (
     check_waterway_intersection,
@@ -18,10 +18,10 @@ from service.validation import (
     visualize_validation_results,
 )
 from service.visualize_trends import (
-    S2_Export_for_visual,
-    S2_Export_for_visual_flowdir,
+    s2_export_for_visual,
+    s2_export_for_visual_flowdir,
     add_landsat_lst_et,
-    compute_all_metrics_LST_ET,
+    compute_all_metrics_lst_et,
     compute_all_metrics_up_downstream,
 )
 
@@ -594,10 +594,10 @@ if st.session_state.questionnaire_shown:
                                 )
                                 st.stop()
 
-                            hydroRaster = prepareHydro(waterway_fc)
+                            hydroRaster = prepare_hydro(waterway_fc)
 
                             # Generate negative points
-                            negativePoints = sampleNegativePoints(
+                            negativePoints = sample_negative_points(
                                 positive_dams_fc, hydroRaster, innerRadius, outerRadius, samplingScale
                             )
 
@@ -833,10 +833,10 @@ if st.session_state.questionnaire_shown:
                                         dam_batch_fc = ee.FeatureCollection(dam_batch)
 
                                         # Process this batch through the entire pipeline
-                                        S2_cloud_mask_batch = ee.ImageCollection(S2_Export_for_visual(dam_batch_fc))
+                                        S2_cloud_mask_batch = ee.ImageCollection(s2_export_for_visual(dam_batch_fc))
                                         S2_ImageCollection_batch = ee.ImageCollection(S2_cloud_mask_batch)
                                         S2_with_LST_batch = S2_ImageCollection_batch.map(add_landsat_lst_et)
-                                        results_fc_lst_batch = S2_with_LST_batch.map(compute_all_metrics_LST_ET)
+                                        results_fc_lst_batch = S2_with_LST_batch.map(compute_all_metrics_lst_et)
                                         results_fcc_lst_batch = ee.FeatureCollection(results_fc_lst_batch)
 
                                         # Convert directly to DataFrame
@@ -985,7 +985,7 @@ if st.session_state.questionnaire_shown:
                                             dam_batch_fc = ee.FeatureCollection(dam_batch)
 
                                             # Process this batch through the entire pipeline
-                                            S2_IC_batch = S2_Export_for_visual_flowdir(dam_batch_fc, waterway_fc)
+                                            S2_IC_batch = s2_export_for_visual_flowdir(dam_batch_fc, waterway_fc)
                                             S2_with_LST_ET = S2_IC_batch.map(add_landsat_lst_et)
                                             results_batch = S2_with_LST_ET.map(compute_all_metrics_up_downstream)
 

@@ -145,7 +145,7 @@ def upload_points_to_ee(file: StringIO, widget_prefix:str="") -> ee.FeatureColle
                         props = feature_obj.get("properties", {"id": i})
                         props["date"] = selected_date  # Add the selected date to the properties
                         features.append(ee.Feature(ee.Geometry(geom), props))
-                    except Exception as e:
+                    except Exception as e:  # pylint: disable=broad-except
                         st.warning(f"Skipped feature {i} due to an error: {e}")
 
                 feature_collection = ee.FeatureCollection(features)
@@ -156,7 +156,7 @@ def upload_points_to_ee(file: StringIO, widget_prefix:str="") -> ee.FeatureColle
             st.error("Unsupported file format. Please upload a CSV or GeoJSON file.")
             return None
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         st.error(f"An error occurred while processing the file: {e}")
         return None
 
@@ -185,7 +185,7 @@ def upload_non_dam_points_to_ee(file, dam_date=None, widget_prefix=""):
                 dam_date = first_feature.get("date").getInfo()
                 if not dam_date:
                     dam_date = "2020-07-01"  # Default date
-            except:
+            except Exception:  # pylint: disable=broad-except
                 dam_date = "2020-07-01"  # Default date
         else:
             dam_date = "2020-07-01"  # Default date
@@ -289,7 +289,7 @@ def upload_non_dam_points_to_ee(file, dam_date=None, widget_prefix=""):
                         props = feature_obj.get("properties", {"id": i})
                         props["date"] = dam_date  # Use the dam date for all features
                         features.append(ee.Feature(ee.Geometry(geom), props))
-                    except Exception as e:
+                    except Exception as e:  # pylint: disable=broad-except
                         st.warning(f"Skipped feature {i} due to an error: {e}")
 
                 feature_collection = ee.FeatureCollection(features)
@@ -300,6 +300,6 @@ def upload_non_dam_points_to_ee(file, dam_date=None, widget_prefix=""):
             st.error("Unsupported file format. Please upload a CSV or GeoJSON file.")
             return None
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         st.error(f"An error occurred while processing the file: {e}")
         return None

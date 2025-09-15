@@ -6,13 +6,13 @@ import seaborn as sns
 import streamlit as st
 
 from service.earth_engine_auth import initialize_earth_engine
-from service.negative_sampling import deduplicate_locations, prepareHydro, sampleNegativePoints
+from service.negative_sampling import deduplicate_locations, prepare_hydro, sample_negative_points
 from service.parser import upload_points_to_ee
 from service.visualize_trends import (
-    S2_Export_for_visual,
-    S2_Export_for_visual_flowdir,
+    s2_export_for_visual,
+    s2_export_for_visual_flowdir,
     add_landsat_lst_et,
-    compute_all_metrics_LST_ET,
+    compute_all_metrics_lst_et,
     compute_all_metrics_up_downstream,
 )
 
@@ -138,10 +138,10 @@ if "Positive_collection" in st.session_state:
 
                 # Convert waterway feature collection to raster
                 waterway_fc = st.session_state.selected_waterway
-                hydroRaster = prepareHydro(waterway_fc)
+                hydroRaster = prepare_hydro(waterway_fc)
 
                 # Sample negative points
-                negativePoints = sampleNegativePoints(positive_dams_fc, hydroRaster, innerRadius, outerRadius, 10)
+                negativePoints = sample_negative_points(positive_dams_fc, hydroRaster, innerRadius, outerRadius, 10)
                 negativePoints = negativePoints.map(
                     lambda feature: feature.set("Dam", "negative").set("date", full_date)
                 )
@@ -244,8 +244,8 @@ if st.session_state["Dam_data"]:
                 for i in range(num_batches):
                     batch = dam_list.slice(i * batch_size, min(total_count, (i + 1) * batch_size))
                     dam_batch = ee.FeatureCollection(batch)
-                    S2_IC_batch = S2_Export_for_visual(dam_batch)
-                    results_batch = S2_IC_batch.map(add_landsat_lst_et).map(compute_all_metrics_LST_ET)
+                    S2_IC_batch = s2_export_for_visual(dam_batch)
+                    results_batch = S2_IC_batch.map(add_landsat_lst_et).map(compute_all_metrics_lst_et)
                     df_batch = geemap.ee_to_df(ee.FeatureCollection(results_batch))
                     df_list.append(df_batch)
                     progress_bar.progress((i + 1) / num_batches)
@@ -301,7 +301,7 @@ if st.session_state["Dam_data"]:
                 for i in range(num_batches):
                     batch = dam_list.slice(i * batch_size, min(total_count, (i + 1) * batch_size))
                     dam_batch = ee.FeatureCollection(batch)
-                    S2_IC_batch = S2_Export_for_visual_flowdir(dam_batch, waterway_fc)
+                    S2_IC_batch = s2_export_for_visual_flowdir(dam_batch, waterway_fc)
                     results_batch = S2_IC_batch.map(add_landsat_lst_et).map(compute_all_metrics_up_downstream)
                     df_batch = geemap.ee_to_df(ee.FeatureCollection(results_batch))
                     df_list.append(df_batch)
