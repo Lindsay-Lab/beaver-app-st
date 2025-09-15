@@ -9,15 +9,15 @@ import seaborn as sns
 import streamlit as st
 
 from service.earth_engine_auth import initialize_earth_engine
-from service.Negative_sample_functions import prepareHydro, sampleNegativePoints
-from service.Parser import upload_non_dam_points_to_ee, upload_points_to_ee
-from service.Validation_service import (
+from service.negative_sampling import prepareHydro, sampleNegativePoints
+from service.parser import upload_non_dam_points_to_ee, upload_points_to_ee
+from service.validation import (
     check_waterway_intersection,
     generate_validation_report,
     validate_dam_waterway_distance,
     visualize_validation_results,
 )
-from service.Visualize_trends import (
+from service.visualize_trends import (
     S2_Export_for_visual,
     S2_Export_for_visual_flowdir,
     add_landsat_lst_et,

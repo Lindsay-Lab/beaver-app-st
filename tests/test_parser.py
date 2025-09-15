@@ -1,4 +1,4 @@
-from service.Parser import clean_coordinate
+from service.parser import clean_coordinate
 
 
 class TestCleanCoordinate:

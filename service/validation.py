@@ -1,3 +1,7 @@
+"""
+Validation for dam locations and generation of reports and visualization.
+"""
+
 from typing import Dict
 
 import ee

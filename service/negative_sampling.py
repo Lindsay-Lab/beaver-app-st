@@ -1,3 +1,7 @@
+"""
+Functions for negative sampling of dam locations for comparative analyses.
+"""
+
 import ee
 
 

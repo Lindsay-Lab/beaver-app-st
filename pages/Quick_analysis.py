@@ -6,9 +6,9 @@ import seaborn as sns
 import streamlit as st
 
 from service.earth_engine_auth import initialize_earth_engine
-from service.Negative_sample_functions import deduplicate_locations, prepareHydro, sampleNegativePoints
-from service.Parser import upload_points_to_ee
-from service.Visualize_trends import (
+from service.negative_sampling import deduplicate_locations, prepareHydro, sampleNegativePoints
+from service.parser import upload_points_to_ee
+from service.visualize_trends import (
     S2_Export_for_visual,
     S2_Export_for_visual_flowdir,
     add_landsat_lst_et,

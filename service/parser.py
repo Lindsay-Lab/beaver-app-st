@@ -1,3 +1,7 @@
+"""
+Utilities for parsing inputs into appropriate formats.
+"""
+
 import csv
 import json
 from io import StringIO

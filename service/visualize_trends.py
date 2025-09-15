@@ -1,3 +1,11 @@
+"""
+Functions for visualizing trends.
+Sentinel-2 Dam Imagery Processing Module.
+
+This module provides functions for extracting and processing Sentinel-2 imagery around dam locations with
+ elevation-based masking and optional flow direction analysis.
+"""
+
 import ee
 import streamlit as st
 
@@ -6,9 +14,102 @@ from .earth_engine_auth import initialize_earth_engine
 initialize_earth_engine()
 
 
-# Functions to for filtering collection
-# Filtering without flow direction
-def S2_Export_for_visual(Dam_Collection):
+def S2_Export_for_visual(dam_collection: ee.FeatureCollection) -> ee.ImageCollection:
+    """
+    Extract cloud-masked Sentinel-2 imagery with elevation masking for dam monitoring.
+
+    This function processes a collection of dam locations to extract Sentinel-2 imagery
+    with cloud masking and elevation-based filtering. Unlike the flow direction version,
+    this function focuses on basic imagery extraction with elevation constraints around
+    each dam location. It returns monthly composites of the least cloudy images.
+
+    Parameters
+    ----------
+    dam_collection : ee.FeatureCollection
+        Collection of dam features with required properties:
+        - Survey_Date : ee.Date or str
+            Date for temporal filtering (±6 months window)
+        - id_property : str
+            Unique identifier for the dam
+        - Dam : str
+            Dam status/type classification
+        - Damdate : str
+            Date string associated with the dam
+        - Point_geo : ee.Geometry.Point, optional
+            Point geometry of the dam location. If None/null, 
+            the centroid of the feature geometry will be used.
+
+    Returns
+    -------
+    ee.ImageCollection
+        Collection of processed monthly Sentinel-2 images with bands:
+        - S2_Blue, S2_Green, S2_Red, S2_NIR : ee.Image bands
+            Renamed Sentinel-2 spectral bands (B2, B3, B4, B8)
+        - S2_Binary_cloudMask : ee.Image band
+            Binary cloud mask (1=clear, 0=cloudy/cirrus)
+        - elevation : ee.Image band  
+            Elevation mask filtered to ±3m/±5m around dam elevation
+
+        Each image includes metadata properties:
+        - First_id : str
+            Composite identifier: {dam_id}_{dam_status}_S2id:_{s2_index}_{dam_date}
+        - Full_id : str
+            Extended identifier with cloud coverage: {First_id}_Cloud_{cloud_percent}
+        - Dam_id : str
+            Original dam identifier
+        - Dam_status : str
+            Dam classification status
+        - Image_month : int
+            Month of image acquisition (1-12)
+        - Image_year : int
+            Year of image acquisition
+        - Area : ee.Geometry
+            Bounding geometry for the analysis area
+        - Cloud_coverage : float
+            Percentage of cloud coverage in the image (0-100)
+        - acquisition_date : ee.Date
+            Date when the Sentinel-2 image was acquired
+        - Point_geo : ee.Geometry.Point
+            Dam point location (original or computed centroid)
+
+    Notes
+    -----
+    The function performs several key processing steps:
+
+    1. **Temporal Filtering**: Filters Sentinel-2 data to ±6 months from Survey_Date
+    2. **Cloud Masking**: Uses QA60 band to create binary cloud masks
+    3. **Elevation Masking**: Filters elevation data to dam elevation +3m/-5m using 3DEP 10m DEM
+    4. **Monthly Aggregation**: Selects the least cloudy image for each month (1-12)
+    5. **Band Renaming**: Standardizes band names for consistency
+
+    The elevation masking process:
+    - Samples elevation at the dam point location
+    - Creates elevation range: [dam_elevation - 5m, dam_elevation + 3m] 
+    - Masks pixels outside this elevation range
+    - Clips all data to the dam's bounding geometry
+
+    Error handling is implemented to catch processing failures and display
+    warnings through Streamlit interface.
+
+    Examples
+    --------
+    `>>> dams = ee.FeatureCollection('projects/my-project/assets/dam-locations')`
+    `>>> result_images = S2_Export_for_visual(dams)`
+    `>>> print(f"Generated {result_images.size().getInfo()} images")`
+    `>>> first_image = ee.Image(result_images.first())`
+    `>>> print(f"Bands: {first_image.bandNames().getInfo()}")`
+    `>>> print(f"Dam ID: {first_image.get('Dam_id').getInfo()}")`
+
+    See Also
+    --------
+    S2_Export_for_visual_flowdir : Version with flow direction analysis
+
+    Raises
+    ------
+    Exception
+        Any processing errors are caught and logged as Streamlit warnings.
+        Failed dam locations return None and are filtered from final collection.
+    """
     def extract_pixels(box):
         try:
             imageDate = ee.Date(box.get("Survey_Date"))
@@ -127,12 +228,78 @@ def S2_Export_for_visual(Dam_Collection):
             st.warning(f"Error processing image: {str(e)}")
             return None
 
-    ImageryCollections = Dam_Collection.map(extract_pixels).flatten()
+    ImageryCollections = dam_collection.map(extract_pixels).flatten()
     return ee.ImageCollection(ImageryCollections)
 
 
-# Filtering with flowline
-def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
+def S2_Export_for_visual_flowdir(dam_collection: ee.FeatureCollection,
+                                 filtered_waterway: ee.FeatureCollection) -> ee.ImageCollection:
+    """
+    Filtering with flowline.
+
+    Extract Sentinel-2 imagery with flow direction analysis for dam monitoring.
+
+    This function processes a collection of dam locations to extract cloud-masked Sentinel-2
+    imagery along with upstream/downstream flow direction analysis based on nearby waterways
+    and elevation data. For each dam location, it identifies the closest flowline, determines
+    flow direction, and creates masked elevation bands for upstream and downstream areas.
+
+    Parameters
+    ----------
+    dam_collection : ee.FeatureCollection
+        Collection of dam features with required properties:
+        - Survey_Date: Date for temporal filtering (±6 months)
+        - id_property: Unique identifier for the dam
+        - Dam: Dam status/type
+        - Damdate: Date string for the dam
+        - Point_geo: Point geometry of the dam location
+
+    filtered_waterway : ee.FeatureCollection
+        Collection of waterway/flowline features used for flow direction analysis.
+        Should contain linear geometries representing water flow paths.
+
+    Returns
+    -------
+    ee.ImageCollection
+        Collection of processed Sentinel-2 images with additional bands:
+        - S2_Blue, S2_Green, S2_Red, S2_NIR: Renamed Sentinel-2 bands
+        - S2_Binary_cloudMask: Binary cloud mask (1=clear, 0=cloudy)
+        - downstream: Elevation mask for downstream flow areas
+        - upstream: Elevation mask for upstream flow areas
+        - elevation: Base elevation mask around dam location
+
+        Each image includes metadata:
+        - First_id, Full_id: Composite identifiers
+        - Dam_id, Dam_status: Dam identification
+        - Image_month, Image_year: Temporal information
+        - Cloud_coverage: Percentage cloud coverage
+        - Area: Bounding geometry
+
+    Notes
+    -----
+    The function performs several complex operations:
+    1. Temporal filtering of Sentinel-2 data (±6 months from survey date)
+    2. Cloud masking using QA60 band
+    3. Elevation-based masking using 3DEP 10m DEM
+    4. Flow direction analysis using closest flowline identification
+    5. Geometric splitting into upstream/downstream regions
+    6. Monthly aggregation selecting least cloudy images
+
+    The flow direction analysis works by:
+    - Finding the closest flowline to the dam point
+    - Creating a perpendicular line across the flow
+    - Splitting the analysis area into upstream/downstream halves
+    - Classifying other flowlines based on spatial relationships
+    - Creating elevation masks for each flow direction
+
+    Examples
+    --------
+    `>>> dam_points = ee.FeatureCollection('projects/my-project/assets/dam-locations')`
+    `>>> waterways = ee.FeatureCollection('USGS/NHDPlus/HR/NHDFlowline')`
+    `>>> result = S2_Export_for_visual_flowdir(dam_points, waterways)`
+    `>>> print(f"Generated {result.size().getInfo()} images")`
+    """
+
     def extract_pixels(box):
         imageDate = ee.Date(box.get("Survey_Date"))
         StartDate = imageDate.advance(-6, "month").format("YYYY-MM-dd")
@@ -596,14 +763,17 @@ def S2_Export_for_visual_flowdir(Dam_Collection, filtered_waterway):
 
         return Complete_collection
 
-    ImageryCollections = Dam_Collection.map(extract_pixels).flatten()
+    ImageryCollections = dam_collection.map(extract_pixels).flatten()
     return ee.ImageCollection(ImageryCollections)
 
 
-# Functions to compute metrics
-# Compute LST
 def compute_lst(s2_image, landsat_col, boxArea):
-    """Computes LST from the median of the filtered Landsat collection."""
+    """
+    Computes LST from the median of the filtered Landsat collection.
+
+    Functions to compute metrics
+    Compute LST
+    """
     median_img = landsat_col.median().clip(boxArea)
 
     # Compute NDVI again, just to get min/max
@@ -632,8 +802,6 @@ def compute_lst(s2_image, landsat_col, boxArea):
     return lst
 
 
-# Functions to add additional datasets- Landsat LST, OPEN-ET ET
-# JUST LST
 def add_landsat_lst(s2_image):
     """
     For each Sentinel-2 image:
@@ -641,6 +809,9 @@ def add_landsat_lst(s2_image):
     2) Filter Landsat images in that same date range.
     3) Compute median LST over the geometry.
     4) Return the original S2 image with an added LST band (or 0 if none found).
+
+    Functions to add additional datasets- Landsat LST, OPEN-ET ET
+    JUST LST
     """
     year = ee.Number(s2_image.get("Image_year"))
     month = ee.Number(s2_image.get("Image_month"))
@@ -817,12 +988,13 @@ def add_landsat_lst_et(s2_image):
     return s2_image.addBands(lst_image).addBands(et_final).set("landsat_collection_size", collection_size)
 
 
-# Compute ET and include upstream and downstream
-# NDVI, LST, ET
 def compute_all_metrics_LST_ET(image) -> ee.Feature:
     """
     Returns an ee.Feature containing mean NDVI, NDWI_Green, LST, and ET
     for the geometry of interest.
+
+    Compute ET and include upstream and downstream
+    NDVI, LST, ET
     """
     # 1) Use the 'elevation' band (or any other reference band) to get geometry
     elevation_mask = image.select("elevation")

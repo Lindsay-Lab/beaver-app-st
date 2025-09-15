@@ -48,6 +48,27 @@ def load_local_config():
     return None
 
 
+def is_earth_engine_initialized():
+    """
+    Check if Google Earth Engine is already initialized.
+
+    First attempts to check the Earth Engine API client's internal initialized state.
+    If that attribute doesn't exist, falls back to testing with a simple Earth Engine
+    operation that will succeed if EE is initialized and fail if not.
+
+    Returns:
+        bool: True if Earth Engine is initialized, False otherwise.
+    """
+    try:
+        return ee.data._initialized
+    except AttributeError:
+        try:
+            ee.Number(1).getInfo()
+            return True
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+
 def initialize_earth_engine():
     """
     Initialize Google Earth Engine with the configured credentials.
@@ -55,6 +76,11 @@ def initialize_earth_engine():
     This function handles the complete Earth Engine initialization process
     including credential retrieval and project setup.
     """
+
+    # Check if Earth Engine is already initialized
+    if is_earth_engine_initialized():
+        # st.info("Earth Engine is already initialized")
+        return
 
     try:
         credentials = get_credentials()
