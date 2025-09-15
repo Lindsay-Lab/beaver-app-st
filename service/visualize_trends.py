@@ -306,7 +306,6 @@ def S2_Export_for_visual_flowdir(dam_collection: ee.FeatureCollection,
         damId = box.get("id_property")
         DamStatus = box.get("Dam")
         DamDate = box.get("Damdate")
-        DamGeo = box.get("Point_geo")
         S2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
 
         # Add band for cloud coverage
@@ -347,11 +346,8 @@ def S2_Export_for_visual_flowdir(dam_collection: ee.FeatureCollection,
             image_date = ee.Date(image.get("system:time_start"))
             image_month = image_date.get("month")
             image_year = image_date.get("year")
-            cloud = image.get("CLOUDY_PIXEL_PERCENTAGE")
-            # intersect = image.get('intersection_ratio')
 
             ## buffered_geometry
-            # buffered_geometry = boxArea.geometry()
             buffered_geometry = box.geometry()
             point_geom = buffered_geometry.centroid()
             buffered_geometry = point_geom.buffer(200)
@@ -362,7 +358,6 @@ def S2_Export_for_visual_flowdir(dam_collection: ee.FeatureCollection,
             elevation_select = dataset.select("elevation")
             elevation = ee.Image(elevation_select)
 
-            # point_geom = firstFeature.geometry()
             point_elevation = ee.Number(elevation.sample(point_geom, 10).first().get("elevation"))
 
             # Clip and mask based on some +/- thresholds
@@ -421,9 +416,6 @@ def S2_Export_for_visual_flowdir(dam_collection: ee.FeatureCollection,
 
             p2 = ee.Geometry.Point(second_coord)
 
-            # Create the first linestring between p1 and p2
-            line1 = ee.Geometry.LineString([p1.coordinates(), p2.coordinates()])
-
             # Cast each coordinate to an ee.Number so we can do arithmetic
             x1 = ee.Number(p1.coordinates().get(0))
             y1 = ee.Number(p1.coordinates().get(1))
@@ -443,8 +435,6 @@ def S2_Export_for_visual_flowdir(dam_collection: ee.FeatureCollection,
             dx_perp = dy
             dy_perp = dx.multiply(-1)
 
-            dx_half = dx_perp.divide(2)
-            dy_half = dy_perp.divide(2)
             length_factor = 10
 
             # Scale the perpendicular vector
@@ -466,9 +456,7 @@ def S2_Export_for_visual_flowdir(dam_collection: ee.FeatureCollection,
             boundingRing = ee.List(boundingCoords.get(0))  # ee.List of [ [west, south], [west, north], ... ]
 
             westSouth = ee.List(boundingRing.get(0))  # [west, south]
-            westNorth = ee.List(boundingRing.get(1))  # [west, north]
             eastNorth = ee.List(boundingRing.get(2))  # [east, north]
-            eastSouth = ee.List(boundingRing.get(3))  # [east, south]
 
             west = ee.Number(westSouth.get(0))
             south = ee.Number(westSouth.get(1))
@@ -490,8 +478,6 @@ def S2_Export_for_visual_flowdir(dam_collection: ee.FeatureCollection,
             bot_feature = ee.Feature(bot_poly, {"id": "bot"})
 
             # Step 2: Buffer the extended line just enough to make a thin clipping strip
-            split_strip = extended_perpendicular.buffer(1)
-
             def get_closest_vertex_index(coords, pt):
                 distances = coords.map(lambda c: ee.Geometry.Point(c).distance(pt))
                 min_dist = distances.reduce(ee.Reducer.min())
@@ -763,12 +749,9 @@ def _add_cloud_coverage_to_id(image: ee.Image) -> ee.Image:
     return image.set("Full_id", ee.String(first_id).cat("_Cloud_").cat(cloud_coverage))
 
 
-def compute_lst(s2_image, landsat_col, boxArea):
+def compute_lst(landsat_col, boxArea):
     """
     Computes LST from the median of the filtered Landsat collection.
-
-    Functions to compute metrics
-    Compute LST
     """
     median_img = landsat_col.median().clip(boxArea)
 
@@ -855,7 +838,7 @@ def add_landsat_lst(s2_image):
     lst_image = ee.Algorithms.If(
         collection_size.eq(0),
         empty_image,
-        compute_lst(s2_image, filtered_col, boxArea),  # 0 LST if no valid Landsat images
+        compute_lst(filtered_col, boxArea),  # 0 LST if no valid Landsat images
     )
 
     lst_image = ee.Image(lst_image)
@@ -1044,11 +1027,6 @@ def compute_all_metrics_up_downstream(image):
     # 1) Grab upstream/downstream mask bands
     upstream_mask = image.select("upstream")
     downstream_mask = image.select("downstream")
-
-    # Check if bands exist
-    valid_up = upstream_mask.reduceRegion(
-        reducer=ee.Reducer.count(), geometry=image.geometry(), scale=10, maxPixels=1e13
-    ).getNumber("upstream")
 
     # 2) Compute NDVI using Sentinel-2 Red & NIR
     ndvi = image.normalizedDifference(["S2_NIR", "S2_Red"]).rename("NDVI")

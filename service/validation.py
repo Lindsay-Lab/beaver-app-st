@@ -151,7 +151,7 @@ def generate_validation_report(validation_results: Dict) -> str:
                     report.append(f"- Point #{i}, Location: [{coords[0]:.6f}, {coords[1]:.6f}]")
 
         return "\n".join(report)
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         st.error(f"Error generating validation report: {str(e)}")
         return "Error generating validation report."
 
