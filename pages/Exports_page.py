@@ -1053,7 +1053,7 @@ if st.session_state.questionnaire_shown:
                                         st.download_button(
                                             "Download Up/Downstream Figures",
                                             buf2,
-                                            "up_downstream.png",
+                                            "upstream_downstream_trends.png",
                                             "image/png",
                                             key="download_updown_fig",
                                         )
@@ -1102,7 +1102,7 @@ if st.session_state.questionnaire_shown:
                                             st.download_button(
                                                 "Download Up/Downstream Data (CSV)",
                                                 csv2,
-                                                "updown_data.csv",
+                                                "upstream_downstream_data.csv",
                                                 "text/csv",
                                                 key="download_updown_csv",
                                             )
@@ -1122,7 +1122,7 @@ if st.session_state.questionnaire_shown:
                         st.download_button(
                             "Download Up/Downstream Figures",
                             buf2,
-                            "up_downstream.png",
+                            "upstream_downstream_trends.png",
                             "image/png",
                             key="redisplay_updown_fig",
                         )
@@ -1137,7 +1137,7 @@ if st.session_state.questionnaire_shown:
                                 coords_df = extract_coordinates_df(st.session_state.Dam_data)
 
                                 if not coords_df.empty:
-                                    # Create a list to store coordinates
+                                    months_per_point = len(export_df) // len(coords_df)
                                     longitudes = []
                                     latitudes = []
 
@@ -1168,7 +1168,7 @@ if st.session_state.questionnaire_shown:
                             st.download_button(
                                 "Download Up/Downstream Data (CSV)",
                                 csv2,
-                                "updown_data.csv",
+                                "upstream_downstream_data.csv",
                                 "text/csv",
                                 key="download_updown_csv",
                             )
