@@ -6,20 +6,20 @@ st.set_page_config(layout="wide")
 st.sidebar.image("assets/pngimg.com - beaver_PNG35.png")
 
 about_page = st.Page(
-    page="pages/About_Lab.py",
+    page="pages/about_lab.py",
     title="About the Tool",
     icon=":material/account_circle:",
     default=True,
 )
 
 project_1_page = st.Page(
-    page="pages/Exports_page.py",
+    page="pages/analyze_impacts.py",
     title="Analyze Impacts!",
     icon=":material/bar_chart:",
 )
 
 # project_2_page = st.Page(
-#     page = "pages/Quick_analysis.py",
+#     page = "pages/quick_analysis.py",
 #     title = "Quickly visualize!",
 #     icon = ":material/bar_chart:",
 
