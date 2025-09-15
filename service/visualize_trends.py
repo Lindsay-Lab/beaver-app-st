@@ -216,12 +216,7 @@ def S2_Export_for_visual(dam_collection: ee.FeatureCollection) -> ee.ImageCollec
 
             filteredCollectionBands = get_monthly_least_cloudy_images(filteredCloudCollection)
 
-            def addCloud(image):
-                id = image.get("First_id")
-                cloud = image.get("Cloud_coverage")
-                return image.set("Full_id", ee.String(id).cat("_Cloud_").cat(cloud))
-
-            Complete_collection = filteredCollectionBands.map(addCloud)
+            Complete_collection = filteredCollectionBands.map(_add_cloud_coverage_to_id)
             return Complete_collection
 
         except Exception as e:
@@ -753,18 +748,19 @@ def S2_Export_for_visual_flowdir(dam_collection: ee.FeatureCollection,
         # filteredCollectionBands = get_monthly_least_cloudy_images(filteredCollection_overlap)
         filteredCollectionBands = get_monthly_least_cloudy_images(filteredCloudCollection)
 
-        def addCloud(image):
-            id = image.get("First_id")
-            cloud = image.get("Cloud_coverage")
-            Complete_id = image.set("Full_id", ee.String(id).cat("_Cloud_").cat(cloud))
-            return Complete_id
-
-        Complete_collection = filteredCollectionBands.map(addCloud)
+        Complete_collection = filteredCollectionBands.map(_add_cloud_coverage_to_id)
 
         return Complete_collection
 
     ImageryCollections = dam_collection.map(extract_pixels).flatten()
     return ee.ImageCollection(ImageryCollections)
+
+
+def _add_cloud_coverage_to_id(image: ee.Image) -> ee.Image:
+    """Add cloud coverage percentage to the image identifier."""
+    first_id: ee.String = image.get("First_id")
+    cloud_coverage: ee.Number = image.get("Cloud_coverage")
+    return image.set("Full_id", ee.String(first_id).cat("_Cloud_").cat(cloud_coverage))
 
 
 def compute_lst(s2_image, landsat_col, boxArea):
