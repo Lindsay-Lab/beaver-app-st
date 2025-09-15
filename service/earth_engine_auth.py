@@ -43,7 +43,7 @@ def load_local_config():
     """Load local development configuration"""
     config_path = "config.yaml"
     if os.path.exists(config_path):
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
     return None
 
@@ -52,21 +52,16 @@ def is_earth_engine_initialized():
     """
     Check if Google Earth Engine is already initialized.
 
-    First attempts to check the Earth Engine API client's internal initialized state.
-    If that attribute doesn't exist, falls back to testing with a simple Earth Engine
-    operation that will succeed if EE is initialized and fail if not.
+    Tests with a simple Earth Engine operation that will succeed if EE is initialized and fail if not.
 
     Returns:
         bool: True if Earth Engine is initialized, False otherwise.
     """
     try:
-        return ee.data._initialized
-    except AttributeError:
-        try:
-            ee.Number(1).getInfo()
-            return True
-        except Exception:  # pylint: disable=broad-except
-            return False
+        ee.Number(1).getInfo()
+        return True
+    except Exception:  # pylint: disable=broad-except
+        return False
 
 
 def initialize_earth_engine():
