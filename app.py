@@ -18,16 +18,5 @@ project_1_page = st.Page(
     icon=":material/bar_chart:",
 )
 
-# project_2_page = st.Page(
-#     page = "pages/quick_analysis.py",
-#     title = "Quickly visualize!",
-#     icon = ":material/bar_chart:",
-
-# )
-
-
 pg = st.navigation(pages=[about_page, project_1_page])
-# st.logo("assets\pngimg.com - beaver_PNG35.png")
 pg.run()
-
-# test

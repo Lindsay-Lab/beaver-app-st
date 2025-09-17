@@ -15,17 +15,7 @@ from .earth_engine_auth import initialize_earth_engine
 initialize_earth_engine()
 
 
-def clean_coordinate(value):
-    """Cleans and converts a coordinate value into a valid float."""
-    try:
-        value = str(value).strip().replace("°", "").replace(",", ".")
-        value = value.replace("N", "").replace("S", "").replace("E", "").replace("W", "")
-        return float(value)
-    except ValueError:
-        return None  # Return None if the value cannot be converted
-
-
-def upload_points_to_ee(file: StringIO, widget_prefix:str="") -> ee.FeatureCollection | None:
+def upload_points_to_ee(file: StringIO, widget_prefix="") -> ee.FeatureCollection | None:
     """
     Modified parser to include widget_prefix and autodetect header
     """
@@ -36,118 +26,35 @@ def upload_points_to_ee(file: StringIO, widget_prefix:str="") -> ee.FeatureColle
         if file.name.endswith(".csv"):
             file.seek(0)
 
-            # Let the user select a delimiter
-            delimiter_display = {",": "Comma (,)", ";": "Semicolon (;)", "\t": "Tab (\\t)"}
-            delimiter_key = st.selectbox(
-                "Select delimiter used in CSV:",
-                list(delimiter_display.values()),
-                index=0,
-                key=f"{widget_prefix}_delimiter_selectbox",
-            )
-            delimiter = [k for k, v in delimiter_display.items() if v == delimiter_key][0]
+            # Handle delimiter selection
+            delimiter = detect_csv_delimiter(widget_prefix)
 
-            # Read a sample for header detection using csv.Sniffer
-            sample = file.read(1024)
-            try:
-                sample_str = sample.decode("utf-8")
-            except AttributeError:
-                sample_str = sample  # already a string
-            sniffer = csv.Sniffer()
-            has_header = sniffer.has_header(sample_str)
-            file.seek(0)  # Reset pointer
+            # Detect headers and process CSV
+            has_header = detect_csv_header(file)
+            df = process_csv_to_dataframe(file, delimiter, has_header)
 
-            # Read the CSV with or without headers
-            if has_header:
-                df = pd.read_csv(file, delimiter=delimiter, header=0, encoding="utf-8")
-            else:
-                df = pd.read_csv(file, delimiter=delimiter, header=None, encoding="utf-8")
-                df.columns = [f"column{i}" for i in range(len(df.columns))]
+            # Handle coordinate column selection
+            longitude_col, latitude_col = display_coordinate_column_selectors(df, widget_prefix)
 
-            st.write("**Preview of the uploaded file:**")
-            st.dataframe(df.head(5))
-
-            # Auto-select Latitude and Longitude columns (case-insensitive)
-            columns_lower = [col.lower() for col in df.columns]
-            if "longitude" in columns_lower:
-                default_longitude = list(df.columns).index(df.columns[columns_lower.index("longitude")])
-            else:
-                default_longitude = 0
-
-            if "latitude" in columns_lower:
-                default_latitude = list(df.columns).index(df.columns[columns_lower.index("latitude")])
-            else:
-                default_latitude = 1 if len(df.columns) > 1 else 0
-
-            longitude_col = st.selectbox(
-                "Select the **Longitude** column:",
-                options=df.columns,
-                index=default_longitude,
-                key=f"{widget_prefix}_longitude_selectbox",
-            )
-            latitude_col = st.selectbox(
-                "Select the **Latitude** column:",
-                options=df.columns,
-                index=default_latitude,
-                key=f"{widget_prefix}_latitude_selectbox",
-            )
-
-            # Year selection & default prompt
-            selected_year = st.selectbox(
-                "Select a year:", list(range(2017, 2025)), index=3, key=f"{widget_prefix}_year_selectbox"
-            )
-            selected_date = f"{selected_year}-07-01"
-
-            if selected_year < 2020 or selected_year > 2025:
-                st.warning("You may proceed to next steps, but ET data may not be available for the selected year.")
+            # Year selection with warnings
+            selected_date = display_year_selector_with_warning(widget_prefix)
 
             if st.button("Confirm and Process Data", key=f"{widget_prefix}_process_data_button"):
-
-                def standardize_feature(row):
-                    longitude = clean_coordinate(row[longitude_col])
-                    latitude = clean_coordinate(row[latitude_col])
-                    if longitude is None or latitude is None:
-                        return None
-                    properties = {"date": selected_date}
-                    return ee.Feature(ee.Geometry.Point([longitude, latitude]), properties)
-
-                standardized_features = list(filter(None, df.apply(standardize_feature, axis=1).tolist()))
+                standardized_features = csv_to_ee_features(df, longitude_col, latitude_col, selected_date)
                 feature_collection = ee.FeatureCollection(standardized_features)
-
                 st.success("CSV successfully uploaded and standardized. Preview the data on the map below.")
                 return feature_collection
 
         elif file.name.endswith(".geojson"):
-            file.seek(0)
-            try:
-                geojson = json.load(file)
-            except json.JSONDecodeError:
-                st.error("Invalid GeoJSON file format.")
+            geojson = load_and_validate_geojson(file)
+            if geojson is None:
                 return None
 
-            if "features" not in geojson or not isinstance(geojson["features"], list):
-                st.error("Invalid GeoJSON format: missing 'features' key.")
-                return None
-
-            # Year selection & default prompt for GeoJSON
-            selected_year = st.selectbox(
-                "Select a year:", list(range(2017, 2025)), index=3, key=f"{widget_prefix}_geojson_year_selectbox"
-            )
-            selected_date = f"{selected_year}-07-01"
-
-            if selected_year < 2020 or selected_year > 2025:
-                st.warning("You may proceed to next steps, but ET data may not be available for the selected year.")
+            # Year selection with warnings
+            selected_date = display_year_selector_with_warning(widget_prefix, "_geojson")
 
             if st.button("Confirm and Process GeoJSON", key=f"{widget_prefix}_geojson_process_button"):
-                features = []
-                for i, feature_obj in enumerate(geojson["features"]):
-                    try:
-                        geom = feature_obj.get("geometry")
-                        props = feature_obj.get("properties", {"id": i})
-                        props["date"] = selected_date  # Add the selected date to the properties
-                        features.append(ee.Feature(ee.Geometry(geom), props))
-                    except Exception as e:  # pylint: disable=broad-except
-                        st.warning(f"Skipped feature {i} due to an error: {e}")
-
+                features = create_ee_features_from_geojson(geojson, selected_date)
                 feature_collection = ee.FeatureCollection(features)
                 st.success("GeoJSON successfully uploaded and converted.")
                 return feature_collection
@@ -161,137 +68,42 @@ def upload_points_to_ee(file: StringIO, widget_prefix:str="") -> ee.FeatureColle
         return None
 
 
-def upload_non_dam_points_to_ee(file, dam_date=None, widget_prefix=""):
+def upload_non_dam_points_to_ee(file: StringIO, dam_date=None, widget_prefix=""):
     """
     Handles CSV and GeoJSON uploads for non-dam points, using the date from dam data.
-    Args:
-        file: The uploaded file (CSV or GeoJSON)
-        dam_date: The date from dam data to be used for non-dam points
-        widget_prefix: Prefix for streamlit widgets to avoid conflicts
-    Returns:
-        ee.FeatureCollection or None if processing fails
     """
     if not file:
         return None
 
-    # If dam_date is not provided, try to get it from session_state
-    if dam_date is None:
-        if "selected_date" in st.session_state:
-            dam_date = st.session_state.selected_date
-        elif "Dam_data" in st.session_state and st.session_state.Dam_data:
-            # Try to get date from the first dam point
-            try:
-                first_feature = ee.Feature(st.session_state.Dam_data.first())
-                dam_date = first_feature.get("date").getInfo()
-                if not dam_date:
-                    dam_date = "2020-07-01"  # Default date
-            except Exception:  # pylint: disable=broad-except
-                dam_date = "2020-07-01"  # Default date
-        else:
-            dam_date = "2020-07-01"  # Default date
-            st.warning("No dam data date found, using default date: 2020-07-01")
+    # Get date from context
+    dam_date = get_dam_date_from_context(dam_date, st.session_state)
 
     try:
         if file.name.endswith(".csv"):
             file.seek(0)
 
-            # Let the user select a delimiter
-            delimiter_display = {",": "Comma (,)", ";": "Semicolon (;)", "\t": "Tab (\\t)"}
-            delimiter_key = st.selectbox(
-                "Select delimiter used in CSV:",
-                list(delimiter_display.values()),
-                index=0,
-                key=f"{widget_prefix}_nondam_delimiter_selectbox",
-            )
-            delimiter = [k for k, v in delimiter_display.items() if v == delimiter_key][0]
+            # Handle delimiter selection
+            delimiter = detect_csv_delimiter(widget_prefix, "_nondam")
 
-            # Read a sample for header detection using csv.Sniffer
-            sample = file.read(1024)
-            try:
-                sample_str = sample.decode("utf-8")
-            except AttributeError:
-                sample_str = sample  # already a string
-            sniffer = csv.Sniffer()
-            has_header = sniffer.has_header(sample_str)
-            file.seek(0)  # Reset pointer
+            # Detect headers and process CSV
+            has_header = detect_csv_header(file)
+            df = process_csv_to_dataframe(file, delimiter, has_header)
 
-            # Read the CSV with or without headers
-            if has_header:
-                df = pd.read_csv(file, delimiter=delimiter, header=0, encoding="utf-8")
-            else:
-                df = pd.read_csv(file, delimiter=delimiter, header=None, encoding="utf-8")
-                df.columns = [f"column{i}" for i in range(len(df.columns))]
-
-            st.write("**Preview of the uploaded file:**")
-            st.dataframe(df.head(5))
-
-            # Auto-select Latitude and Longitude columns (case-insensitive)
-            columns_lower = [col.lower() for col in df.columns]
-            if "longitude" in columns_lower:
-                default_longitude = list(df.columns).index(df.columns[columns_lower.index("longitude")])
-            else:
-                default_longitude = 0
-
-            if "latitude" in columns_lower:
-                default_latitude = list(df.columns).index(df.columns[columns_lower.index("latitude")])
-            else:
-                default_latitude = 1 if len(df.columns) > 1 else 0
-
-            longitude_col = st.selectbox(
-                "Select the **Longitude** column:",
-                options=df.columns,
-                index=default_longitude,
-                key=f"{widget_prefix}_nondam_longitude_selectbox",
-            )
-            latitude_col = st.selectbox(
-                "Select the **Latitude** column:",
-                options=df.columns,
-                index=default_latitude,
-                key=f"{widget_prefix}_nondam_latitude_selectbox",
-            )
-
-            # Display the date that will be used
+            # Handle coordinate column selection
+            longitude_col, latitude_col = display_coordinate_column_selectors(df, widget_prefix, "_nondam")
 
             if st.button("Confirm and Process Data", key=f"{widget_prefix}_nondam_process_data_button"):
-
-                def standardize_feature(row):
-                    longitude = clean_coordinate(row[longitude_col])
-                    latitude = clean_coordinate(row[latitude_col])
-                    if longitude is None or latitude is None:
-                        return None
-                    properties = {"date": dam_date}
-                    return ee.Feature(ee.Geometry.Point([longitude, latitude]), properties)
-
-                standardized_features = list(filter(None, df.apply(standardize_feature, axis=1).tolist()))
+                standardized_features = csv_to_ee_features(df, longitude_col, latitude_col, dam_date)
                 feature_collection = ee.FeatureCollection(standardized_features)
-
                 return feature_collection
 
         elif file.name.endswith(".geojson"):
-            file.seek(0)
-            try:
-                geojson = json.load(file)
-            except json.JSONDecodeError:
-                st.error("Invalid GeoJSON file format.")
+            geojson = load_and_validate_geojson(file)
+            if geojson is None:
                 return None
-
-            if "features" not in geojson or not isinstance(geojson["features"], list):
-                st.error("Invalid GeoJSON format: missing 'features' key.")
-                return None
-
-            # Display the date that will be used
 
             if st.button("Confirm and Process GeoJSON", key=f"{widget_prefix}_nondam_geojson_process_button"):
-                features = []
-                for i, feature_obj in enumerate(geojson["features"]):
-                    try:
-                        geom = feature_obj.get("geometry")
-                        props = feature_obj.get("properties", {"id": i})
-                        props["date"] = dam_date  # Use the dam date for all features
-                        features.append(ee.Feature(ee.Geometry(geom), props))
-                    except Exception as e:  # pylint: disable=broad-except
-                        st.warning(f"Skipped feature {i} due to an error: {e}")
-
+                features = create_ee_features_from_geojson(geojson, dam_date)
                 feature_collection = ee.FeatureCollection(features)
                 st.success("Non-dam points GeoJSON successfully uploaded and converted.")
                 return feature_collection
@@ -302,6 +114,183 @@ def upload_non_dam_points_to_ee(file, dam_date=None, widget_prefix=""):
 
     except Exception as e:  # pylint: disable=broad-except
         st.error(f"An error occurred while processing the file: {e}")
+        return None
+
+
+def detect_csv_delimiter(widget_prefix, suffix=""):
+    """Handle CSV delimiter selection UI and return chosen delimiter"""
+    delimiter_display = {",": "Comma (,)", ";": "Semicolon (;)", "\t": "Tab (\\t)"}
+    delimiter_key = st.selectbox(
+        "Select delimiter used in CSV:",
+        list(delimiter_display.values()),
+        index=0,
+        key=f"{widget_prefix}{suffix}_delimiter_selectbox",
+    )
+    return [k for k, v in delimiter_display.items() if v == delimiter_key][0]
+
+
+def detect_csv_header(file):
+    """Use csv.Sniffer to detect if CSV has headers, return boolean"""
+    sample = file.read(1024)
+    try:
+        sample_str = sample.decode("utf-8")
+    except AttributeError:
+        sample_str = sample  # already a string
+
+    sniffer = csv.Sniffer()
+    has_header = sniffer.has_header(sample_str)
+    file.seek(0)  # Reset pointer
+    return has_header
+
+
+def process_csv_to_dataframe(file, delimiter, has_header):
+    """Read CSV into DataFrame with proper headers"""
+    if has_header:
+        df = pd.read_csv(file, delimiter=delimiter, header=0, encoding="utf-8")
+    else:
+        df = pd.read_csv(file, delimiter=delimiter, header=None, encoding="utf-8")
+        df.columns = [f"column{i}" for i in range(len(df.columns))]
+
+    st.write("**Preview of the uploaded file:**")
+    st.dataframe(df.head(5))
+    return df
+
+
+def auto_select_coordinate_columns(df):
+    """Return default indices for lat/lon columns based on column names"""
+    columns_lower = [col.lower() for col in df.columns]
+
+    if "longitude" in columns_lower:
+        default_longitude = list(df.columns).index(df.columns[columns_lower.index("longitude")])
+    else:
+        default_longitude = 0
+
+    if "latitude" in columns_lower:
+        default_latitude = list(df.columns).index(df.columns[columns_lower.index("latitude")])
+    else:
+        default_latitude = 1 if len(df.columns) > 1 else 0
+
+    return default_longitude, default_latitude
+
+
+def display_coordinate_column_selectors(df, widget_prefix, suffix=""):
+    """Show lat/lon column selectboxes and return selected column names"""
+    default_longitude, default_latitude = auto_select_coordinate_columns(df)
+
+    longitude_col = st.selectbox(
+        "Select the **Longitude** column:",
+        options=df.columns,
+        index=default_longitude,
+        key=f"{widget_prefix}{suffix}_longitude_selectbox",
+    )
+    latitude_col = st.selectbox(
+        "Select the **Latitude** column:",
+        options=df.columns,
+        index=default_latitude,
+        key=f"{widget_prefix}{suffix}_latitude_selectbox",
+    )
+
+    return longitude_col, latitude_col
+
+
+def load_and_validate_geojson(file):
+    """Load and validate GeoJSON structure, return parsed data or None"""
+    file.seek(0)
+    try:
+        geojson = json.load(file)
+    except json.JSONDecodeError:
+        st.error("Invalid GeoJSON file format.")
+        return None
+
+    if "features" not in geojson or not isinstance(geojson["features"], list):
+        st.error("Invalid GeoJSON format: missing 'features' key.")
+        return None
+
+    return geojson
+
+
+def create_ee_feature_from_row(row, longitude_col, latitude_col, date, extra_props=None):
+    """Create EE feature from DataFrame row with coordinate cleaning"""
+    longitude = clean_coordinate(row[longitude_col])
+    latitude = clean_coordinate(row[latitude_col])
+    if longitude is None or latitude is None:
+        return None
+
+    properties = {"date": date}
+    if extra_props:
+        properties.update(extra_props)
+
+    return ee.Feature(ee.Geometry.Point([longitude, latitude]), properties)
+
+
+def csv_to_ee_features(df, longitude_col, latitude_col, date):
+    """Convert DataFrame to list of EE features"""
+
+    def standardize_feature(row):
+        return create_ee_feature_from_row(row, longitude_col, latitude_col, date)
+
+    return list(filter(None, df.apply(standardize_feature, axis=1).tolist()))
+
+
+def create_ee_features_from_geojson(geojson, date):
+    """Convert GeoJSON features to Earth Engine features with given date"""
+    features = []
+    for i, feature_obj in enumerate(geojson["features"]):
+        try:
+            geom = feature_obj.get("geometry")
+            props = feature_obj.get("properties", {"id": i})
+            props["date"] = date
+            features.append(ee.Feature(ee.Geometry(geom), props))
+        except Exception as e:  # pylint: disable=broad-except
+            st.warning(f"Skipped feature {i} due to an error: {e}")
+
+    return features
+
+
+def display_year_selector_with_warning(widget_prefix, suffix=""):
+    """Show year selector and ET data warnings, return selected date"""
+    selected_year = st.selectbox(
+        "Select a year:",
+        list(range(2017, 2025)),
+        index=3,
+        key=f"{widget_prefix}{suffix}_year_selectbox"
+    )
+    selected_date = f"{selected_year}-07-01"
+
+    if selected_year < 2020 or selected_year > 2025:
+        st.warning("You may proceed to next steps, but ET data may not be available for the selected year.")
+
+    return selected_date
+
+
+def get_dam_date_from_context(dam_date, session_state):
+    """Get date from various sources with fallback logic"""
+    if dam_date is not None:
+        return dam_date
+
+    if "selected_date" in session_state:
+        return session_state.selected_date
+
+    if "Dam_data" in session_state and session_state.Dam_data:
+        try:
+            first_feature = ee.Feature(session_state.Dam_data.first())
+            dam_date = first_feature.get("date").getInfo()
+            if dam_date:
+                return dam_date
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    st.warning("No dam data date found, using default date: 2020-07-01")
+    return "2020-07-01"
+
+
+def clean_coordinate(value) -> float | None:
+    """Cleans and converts a coordinate value into a valid float."""
+    try:
+        value = str(value).strip().replace("°", "").replace(",", ".")
+        value = value.replace("N", "").replace("S", "").replace("E", "").replace("W", "")
+        return float(value)
+    except ValueError:
         return None
 
 
