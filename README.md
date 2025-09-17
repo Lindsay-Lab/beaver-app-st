@@ -1,14 +1,58 @@
 # Beaver Impacts Tool: Developer Guide (Tentative)
 
 ## Table of Contents
-1. [Architecture Overview](#architecture-overview)
-2. [Code Structure](#code-structure)
-3. [Key Components](#key-components)
-4. [Data Processing Pipeline](#data-processing-pipeline)
-5. [Earth Engine Integration](#earth-engine-integration)
-6. [Visualization Components](#visualization-components)
-7. [Adding New Features](#adding-new-features)
-8. [Common Issues and Debugging](#common-issues-and-debugging)
+1. [Local Setup](#local-setup)
+2. [Architecture Overview](#architecture-overview)
+3. [Code Structure](#code-structure)
+4. [Key Components](#key-components)
+5. [Data Processing Pipeline](#data-processing-pipeline)
+6. [Earth Engine Integration](#earth-engine-integration)
+7. [Visualization Components](#visualization-components)
+8. [Adding New Features](#adding-new-features)
+9. [Common Issues and Debugging](#common-issues-and-debugging)
+
+## Local Setup
+
+To run the streamlit app locally, you'll need to install the required dependencies including `streamlit`:
+- Create a virtual environment however you prefer (e.g., `python3 -m venv venv`)
+- Install dependencies from requirements.txt (e.g., `pip install -r requirements.txt`)
+
+Example local installation with a virtual environment:
+```commandline
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+Note: If you installed the requirements in a virtual environment, you will have to run the following commands from that virtual environment.
+
+Get Google Earth Engine authentication token if you don't have one already:
+```commandline
+earthengine authenticate
+```
+This will open a page in your browser for you to confirm Google permissions to allow your account to use Google Earth Engine.
+
+Create a project in Google Cloud:
+1. Go to https://console.cloud.google.com/
+2. Create a new project and make a note of the project id (which can be different from the name)
+
+Copy config.yaml.example to config.yaml
+```commandline
+cp config.yaml.example config.yaml
+```
+Add your project id to the `config.yaml` file.
+
+Enable the Earth Engine API for your project:
+1. Go to https://console.cloud.google.com/apis/library/earthengine.googleapis.com
+2. Select your project and click "Enable".
+
+Register your project ID with Earth Engine:
+https://code.earthengine.google.com/register?project=your-gcp-project-id
+
+Running streamlit app locally:
+```commandline
+streamlit run app.py
+```
+Streamlit will start a local development server. By default, it opens in your browser at: http://localhost:8501
 
 ## Architecture Overview
 
