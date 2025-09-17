@@ -896,6 +896,90 @@ def add_landsat_lst_et(s2_image):
     return s2_image.addBands(lst_image).addBands(et_final).set("landsat_collection_size", collection_size)
 
 
+def compute_all_metrics_lst_et(image) -> ee.Feature:
+    """
+    Returns an ee.Feature containing mean NDVI, NDWI_Green, LST, and ET
+    for the geometry of interest.
+    """
+    # Get geometry from elevation band
+    elevation_mask = image.select("elevation")
+    geometry = elevation_mask.geometry()
+
+    # Compute indices
+    ndvi, ndwi_green = _compute_indices(image)
+
+    # Prepare bands for reduction
+    bands = {
+        "NDVI": ndvi,
+        "NDWI_Green": ndwi_green,
+        "LST": image.select("LST"),
+        "ET": image.select("ET")
+    }
+
+    # Reduce all bands over geometry
+    reduced_values = _reduce_bands_by_mask(bands, geometry=geometry)
+
+    # Extract metadata and combine with metrics
+    metadata = _extract_metadata(image)
+    combined_metrics = {**metadata, **reduced_values}
+
+    return ee.Feature(None, ee.Dictionary(combined_metrics))
+
+
+def compute_all_metrics_up_downstream(image):
+    """
+    Returns an ee.Feature containing separate upstream/downstream mean NDVI, NDWI_Green, LST, and ET.
+    """
+    # Get masks
+    upstream_mask = image.select("upstream")
+    downstream_mask = image.select("downstream")
+    geometry = image.geometry()
+
+    # Compute indices
+    ndvi, ndwi_green = _compute_indices(image)
+
+    # Prepare bands for reduction
+    bands = {
+        "NDVI": ndvi,
+        "NDWI_Green": ndwi_green,
+        "LST": image.select("LST"),
+        "ET": image.select("ET")
+    }
+
+    # Reduce for upstream and downstream
+    upstream_results = {}
+    downstream_results = {}
+
+    for band_name, band in bands.items():
+        # Upstream
+        up_value = _reduce_bands_by_mask(
+            bands={band_name: band},
+            mask=upstream_mask,
+            geometry=geometry
+        )[band_name]
+        upstream_results[f"{band_name}_up"] = up_value
+
+        # Downstream
+        down_value = _reduce_bands_by_mask(
+            bands={band_name: band},
+            mask=downstream_mask,
+            geometry=geometry
+        )[band_name]
+        downstream_results[f"{band_name}_down"] = down_value
+
+    # Extract metadata and combine all results
+    metadata = _extract_metadata(image)
+    combined_metrics = {**metadata, **upstream_results, **downstream_results}
+
+    # Fix naming inconsistency: NDWI_Green -> NDWI for downstream function
+    if "NDWI_Green_up" in combined_metrics:
+        combined_metrics["NDWI_up"] = combined_metrics.pop("NDWI_Green_up")
+    if "NDWI_Green_down" in combined_metrics:
+        combined_metrics["NDWI_down"] = combined_metrics.pop("NDWI_Green_down")
+
+    return ee.Feature(None, ee.Dictionary(combined_metrics))
+
+
 def _compute_indices(image):
     """Helper function to compute NDVI and NDWI_Green indices."""
     ndvi = image.normalizedDifference(["S2_NIR", "S2_Red"]).rename("NDVI")
@@ -913,7 +997,7 @@ def _extract_metadata(image):
     }
 
 
-def _reduce_bands_by_mask(image, bands, mask=None, geometry=None):
+def _reduce_bands_by_mask(bands, mask=None, geometry=None):
     """
     Helper function to reduce bands with optional mask over geometry.
     Uses appropriate scale for each band type:
@@ -921,7 +1005,6 @@ def _reduce_bands_by_mask(image, bands, mask=None, geometry=None):
     - 30m for Landsat derived bands (LST, ET)
 
     Args:
-        image: ee.Image containing the bands
         bands: dict mapping band names to ee.Image bands
         mask: optional ee.Image mask to apply
         geometry: geometry for reduction
@@ -958,87 +1041,3 @@ def _reduce_bands_by_mask(image, bands, mask=None, geometry=None):
         results[band_name] = reduced_value
 
     return results
-
-
-def compute_all_metrics_lst_et(image) -> ee.Feature:
-    """
-    Returns an ee.Feature containing mean NDVI, NDWI_Green, LST, and ET
-    for the geometry of interest.
-    """
-    # Get geometry from elevation band
-    elevation_mask = image.select("elevation")
-    geometry = elevation_mask.geometry()
-
-    # Compute indices
-    ndvi, ndwi_green = _compute_indices(image)
-
-    # Prepare bands for reduction
-    bands = {
-        "NDVI": ndvi,
-        "NDWI_Green": ndwi_green,
-        "LST": image.select("LST"),
-        "ET": image.select("ET")
-    }
-
-    # Reduce all bands over geometry
-    reduced_values = _reduce_bands_by_mask(image, bands, geometry=geometry)
-
-    # Extract metadata and combine with metrics
-    metadata = _extract_metadata(image)
-    combined_metrics = {**metadata, **reduced_values}
-
-    return ee.Feature(None, ee.Dictionary(combined_metrics))
-
-
-def compute_all_metrics_up_downstream(image):
-    """
-    Returns an ee.Feature containing separate upstream/downstream mean NDVI, NDWI_Green, LST, and ET.
-    """
-    # Get masks
-    upstream_mask = image.select("upstream")
-    downstream_mask = image.select("downstream")
-    geometry = image.geometry()
-
-    # Compute indices
-    ndvi, ndwi_green = _compute_indices(image)
-
-    # Prepare bands for reduction
-    bands = {
-        "NDVI": ndvi,
-        "NDWI_Green": ndwi_green,
-        "LST": image.select("LST"),
-        "ET": image.select("ET")
-    }
-
-    # Reduce for upstream and downstream
-    upstream_results = {}
-    downstream_results = {}
-
-    for band_name, band in bands.items():
-        # Upstream
-        up_value = _reduce_bands_by_mask(
-            image, {band_name: band},
-            mask=upstream_mask,
-            geometry=geometry
-        )[band_name]
-        upstream_results[f"{band_name}_up"] = up_value
-
-        # Downstream
-        down_value = _reduce_bands_by_mask(
-            image, {band_name: band},
-            mask=downstream_mask,
-            geometry=geometry
-        )[band_name]
-        downstream_results[f"{band_name}_down"] = down_value
-
-    # Extract metadata and combine all results
-    metadata = _extract_metadata(image)
-    combined_metrics = {**metadata, **upstream_results, **downstream_results}
-
-    # Fix naming inconsistency: NDWI_Green -> NDWI for downstream function
-    if "NDWI_Green_up" in combined_metrics:
-        combined_metrics["NDWI_up"] = combined_metrics.pop("NDWI_Green_up")
-    if "NDWI_Green_down" in combined_metrics:
-        combined_metrics["NDWI_down"] = combined_metrics.pop("NDWI_Green_down")
-
-    return ee.Feature(None, ee.Dictionary(combined_metrics))
