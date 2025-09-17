@@ -877,8 +877,8 @@ if st.session_state.questionnaire_shown:
                                             "Flow",
                                             metric,
                                         )
-                                        melted["Flow"].replace(
-                                            {f"{metric}_up": "Upstream", f"{metric}_down": "Downstream"}, inplace=True
+                                        melted["Flow"] = melted["Flow"].replace(
+                                            {f"{metric}_up": "Upstream", f"{metric}_down": "Downstream"}
                                         )
                                         sns.lineplot(
                                             data=melted,
