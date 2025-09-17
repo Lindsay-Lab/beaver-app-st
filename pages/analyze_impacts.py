@@ -1029,7 +1029,6 @@ def render_step6():
                 with safe_processing("Analyzing Upstream & Downstream"):
                     result = analyze_upstream_downstream()
                     if result:
-                        st.pyplot(result['figure'])
                         display_success_message("Upstream & downstream analysis completed successfully!")
 
         if SessionStateManager.get('upstream_analysis_complete', False):
