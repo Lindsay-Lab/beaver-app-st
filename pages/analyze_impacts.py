@@ -27,12 +27,21 @@ from service.validation import (
     validate_dam_waterway_distance,
     visualize_validation_results,
 )
+# from service.visualize_trends import (
+#     s2_export_for_visual,
+#     s2_export_for_visual_flowdir,
+#     add_landsat_lst_et,
+#     compute_all_metrics_lst_et,
+#     compute_all_metrics_up_downstream,
+# )
+
 from service.visualize_trends import (
-    s2_export_for_visual,
-    s2_export_for_visual_flowdir,
+    s2_export_for_visual_generic,
     add_landsat_lst_et,
     compute_all_metrics_lst_et,
     compute_all_metrics_up_downstream,
+    add_upstream_downstream_elevation_band,
+    add_elevation_band
 )
 
 
@@ -802,7 +811,7 @@ def analyze_combined_effects():
             dam_batch_fc = ee.FeatureCollection(dam_batch)
 
             # Process batch through pipeline
-            s2_cloud_mask_batch = ee.ImageCollection(s2_export_for_visual(dam_batch_fc))
+            s2_cloud_mask_batch = ee.ImageCollection(s2_export_for_visual_generic(dam_batch_fc, add_elevation_band))
             s2_image_collection_batch = ee.ImageCollection(s2_cloud_mask_batch)
             s2_with_lst_batch = s2_image_collection_batch.map(add_landsat_lst_et)
             results_fc_lst_batch = s2_with_lst_batch.map(compute_all_metrics_lst_et)
@@ -890,7 +899,8 @@ def analyze_upstream_downstream():
             dam_batch_fc = ee.FeatureCollection(dam_batch)
 
             # Process through pipeline
-            s2_ic_batch = s2_export_for_visual_flowdir(dam_batch_fc, waterway_fc)
+            s2_ic_batch = s2_export_for_visual_generic(dam_batch_fc, add_upstream_downstream_elevation_band, waterway_fc)
+
             s2_with_lst_et = s2_ic_batch.map(add_landsat_lst_et)
             results_batch = s2_with_lst_et.map(compute_all_metrics_up_downstream)
 
