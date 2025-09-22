@@ -247,47 +247,6 @@ initialize_earth_engine()
 #     return monthly_images_collection
 
 
-# def add_cloud_mask_band(image):
-#     """
-#     Add bands for cloud mask where 1 is clear and 0 is cloudy pixels.
-#     Args:
-#         image: an image with bits for clouds and cirrus.
-#     Returns: image with additional bands
-#     """
-#     qa = image.select("QA60")
-
-#     # Bits 10 and 11 are clouds and cirrus, respectively.
-#     cloud_bit_mask = 1 << 10
-#     cirrus_bit_mask = 1 << 11
-
-#     # Both flags should be set to zero, indicating clear conditions.
-#     cloud_mask = qa.bitwiseAnd(cloud_bit_mask).eq(0).And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
-#     # Create a band with values 1 (clear) and 0 (cloudy or cirrus) and convert from byte to Uint16
-#     cloud_mask_band = cloud_mask.rename("cloudMask").toUint16()
-
-#     return image.addBands(cloud_mask_band)
-
-
-# def add_acquisition_date(image):
-#     """
-#     Add acquisition date metadata to image.
-#     Args:
-#         image: an image.
-#     Returns: image with acquisition date metadata added.
-#     """
-#     date = ee.Date(image.get("system:time_start"))
-#     return image.set("acquisition_date", date)
-
-
-# def rename_bands(s2_cloud_band):
-#     """Change band names"""
-#     old_band_names = ["B2", "B3", "B4", "B8", "cloudMask"]
-#     new_band_names = ["S2_Blue", "S2_Green", "S2_Red", "S2_NIR", "S2_Binary_cloudMask"]
-
-#     s2_named_bands = s2_cloud_band.map(lambda image: image.select(old_band_names).rename(new_band_names))
-#     return s2_named_bands
-
-
 # def s2_export_for_visual_flowdir(dam_collection: ee.FeatureCollection,
 #                                  filtered_waterway: ee.FeatureCollection) -> ee.ImageCollection:
 #     """
@@ -408,28 +367,6 @@ initialize_earth_engine()
 
 #     imagery_collections = dam_collection.map(extract_pixels).flatten()
 #     return ee.ImageCollection(imagery_collections)
-
-
-def get_monthly_least_cloudy_images(collection):
-    """
-    Get the least cloudy image for each month from the collection.
-
-    Args:
-        collection (ee.ImageCollection): Collection of images with cloud coverage data
-
-    Returns:
-        ee.ImageCollection: Collection with one image per month (least cloudy)
-    """
-    months = ee.List.sequence(1, 12)
-
-    def get_month_image(month):
-        monthly_images = collection.filter(ee.Filter.calendarRange(month, month, "month"))
-        return ee.Image(monthly_images.sort("CLOUDY_PIXEL_PERCENTAGE").first())
-
-    monthly_images_list = months.map(get_month_image)
-    monthly_images_collection = ee.ImageCollection.fromImages(monthly_images_list)
-    return monthly_images_collection
-
 
 
 def add_cloud_mask_band(image):
@@ -862,40 +799,6 @@ def add_upstream_downstream_elevation_band(image,box,filtered_waterway):
     # .addBands(upstream_elev_mask).addBands(downstream_elev_mask)
     return Full_image.addBands(downstream_rename).addBands(upstream_rename).addBands(elevation_masked2)
 
-def s2_export_for_visual_flowdir2(dam_collection, filtered_waterway):
-    def extract_pixels(box):
-        imageDate = ee.Date(box.get("Survey_Date"))
-        StartDate = imageDate.advance(-6, 'month').format("YYYY-MM-dd")
-        EndDate = imageDate.advance(6, 'month').format("YYYY-MM-dd")
-
-        boxArea = box.geometry()
-        damId = box.get("id_property")
-        DamStatus = box.get('Dam')
-        DamDate = box.get('Damdate')
-        DamGeo = box.get('Point_geo')
-        S2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-        filteredCollection = S2.filterDate(StartDate, EndDate).filterBounds(boxArea)
-        
-        # Define the dataset
-        s2_cloud_band = filteredCollection.map(add_cloud_mask_band)
-        s2_named_bands = rename_bands(s2_cloud_band)
-        s2_cloud_masked = s2_named_bands.map(apply_cloud_mask)
-        s2_cloud_filter = s2_cloud_masked.map(add_acquisition_date)
-        filteredCollectionBands = get_monthly_median(s2_cloud_filter) 
-        
-        # Set metadata to each image
-        filteredCollectionBands = filteredCollectionBands.map(lambda img: img.set('DamGeo', DamGeo)
-            .set('boxArea', boxArea)
-            .set('damId', damId)
-            .set('DamStatus', DamStatus))
-
-     
-        filteredCollectionBands = filteredCollectionBands.map(lambda img: add_upstream_downstream_elevation_band(img, box, filtered_waterway))
-
-        return filteredCollectionBands
-
-    ImageryCollections = dam_collection.map(extract_pixels).flatten()
-    return ee.ImageCollection(ImageryCollections)
 
 def s2_export_for_visual_generic(dam_collection, elevation_function, filtered_waterway=None):
     def extract_pixels(box):
