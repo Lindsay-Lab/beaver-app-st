@@ -871,80 +871,93 @@ def add_landsat_lst_et(s2_image):
         return image.updateMask(mask)
 
     # st.write("DEBUG: Fetching Landsat collection")
-    landsat_col = (
-        ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
-        .filterDate(start_date, end_date)
-        .filterBounds(box_area)
-        .map(apply_scale_factors)
-        .map(cloud_mask)
-    )
+    lc08 = (ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+            .filterDate(start_date, end_date)
+            .filterBounds(box_area))
+    lc09 = (ee.ImageCollection("LANDSAT/LC09/C02/T1_L2")
+            .filterDate(start_date, end_date)
+            .filterBounds(box_area))
+    landsat_col = (lc08.merge(lc09)
+                        .map(apply_scale_factors)
+                        .map(cloud_mask))
 
     # st.write(f"DEBUG: Landsat collection size")
 
+    # Add NDVI stats as properties for filtering
     def add_ndvi_stats(img):
         ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
-        ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=box_area, scale=30, maxPixels=1e13)
-        return img.setMulti(ndvi_dict)
-
-    # st.write("DEBUG: Adding NDVI stats")
+        d = ndvi.reduceRegion(
+            reducer=ee.Reducer.minMax(),
+            geometry=box_area,
+            scale=30,
+            maxPixels=1e13
+        )
+        # Store only if we actually got values
+        return img.setMulti(ee.Dictionary(d))
     landsat_col = landsat_col.map(add_ndvi_stats)
-    filtered_col = landsat_col.filter(ee.Filter.neq("NDVI_min", None))
+
+    filtered_col = landsat_col.filter(ee.Filter.notNull(['NDVI_min', 'NDVI_max']))
     collection_size = filtered_col.size()
     # st.write(f"DEBUG: Filtered collection size")
 
-    # Robust LST calculation handling special cases
-    def robust_compute_lst(filtered_col, box_area):
-        def lst_from_image(img):
-            # st.write("DEBUG: Computing LST from single image")
-            ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
-            # st.write("DEBUG: Computing NDVI stats")
-            ndvi_dict = ndvi.reduceRegion(reducer=ee.Reducer.minMax(), geometry=box_area, scale=30, maxPixels=1e13)
-
-            ndvi_min = ee.Number(ndvi_dict.get("NDVI_min"))
-            ndvi_max = ee.Number(ndvi_dict.get("NDVI_max"))
-
-            # Handle None values explicitly
-            ndvi_min = ee.Number(ee.Algorithms.If(ndvi_min, ndvi_min, 0))
-            ndvi_max = ee.Number(ee.Algorithms.If(ndvi_max, ndvi_max, 1))
-
-            # Check explicitly for identical min/max or zero-range NDVI
-            zero_range = ndvi_max.subtract(ndvi_min).abs().lt(1e-6)
-
-            # st.write("DEBUG: Computing FV")
-            fv = ee.Image(
-                ee.Algorithms.If(
-                    zero_range,
-                    ee.Image.constant(99).rename("FV"),  # default FV for no variation
-                    ndvi.subtract(ndvi_min).divide(ndvi_max.subtract(ndvi_min)).pow(2).rename("FV"),
-                )
+    def lst_from_image(img):
+        ndvi = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
+        d = ee.Dictionary(
+            ndvi.reduceRegion(
+                reducer=ee.Reducer.minMax(),
+                geometry=box_area,
+                scale=30,
+                maxPixels=1e13
             )
+        )
+    
+        has_min = d.contains('NDVI_min')
+        has_max = d.contains('NDVI_max')
+    
+        # Python EE: no And/Or; do nested If to compute "has_both"
+        has_both = ee.Algorithms.If(has_min, ee.Algorithms.If(has_max, True, False), False)
+    
+        ndvi_min = ee.Number(ee.Algorithms.If(has_min, d.get('NDVI_min'), 0))
+        ndvi_max = ee.Number(ee.Algorithms.If(has_max, d.get('NDVI_max'), 1))
+    
+        # If we have both stats, check real range; otherwise treat as zero-range (invalid)
+        zero_range = ee.Algorithms.If(
+            has_both,
+            ndvi_max.subtract(ndvi_min).abs().lt(1e-6),
+            True
+        )
+    
+        fv = ee.Image(
+            ee.Algorithms.If(
+                zero_range,
+                # fully masked placeholder so downstream math stays valid
+                ee.Image.constant(0).toFloat().selfMask(),
+                ndvi.subtract(ndvi_min).divide(ndvi_max.subtract(ndvi_min)).pow(2)
+            )
+        ).rename('FV')
+    
+        em = fv.multiply(0.004).add(0.986).rename("EM")
+        tb = img.select("ST_B10").rename("TB")
+    
+        lst = tb.expression(
+            "(TB / (1 + (0.00115 * (TB / 1.438)) * log(em))) - 273.15",
+            {"TB": tb, "em": em}
+        ).rename("LST")
+    
+        return lst.updateMask(fv.mask())
 
-            # st.write("DEBUG: Computing EM")
-            em = fv.multiply(0.004).add(0.986).rename("EM")
-            thermal = img.select("ST_B10").rename("thermal")
-
-            # st.write("DEBUG: Computing final LST")
-            lst = thermal.expression(
-                "(TB / (1 + (0.00115 * (TB / 1.438)) * log(em))) - 273.15", {"TB": thermal, "em": em}
-            ).rename("LST")
-
-            return lst
-
-        # st.write("DEBUG: Starting robust LST computation")
-        lst_image = ee.Algorithms.If(
+    lst_image = ee.Image(
+        ee.Algorithms.If(
             filtered_col.size().eq(0),
-            ee.Image.constant(99).rename("LST").clip(box_area),
+            # no valid Landsat → masked LST image (no bogus 99s)
+            ee.Image.constant(0).toFloat().selfMask().rename('LST').clip(box_area),
             ee.Algorithms.If(
                 filtered_col.size().eq(1),
-                lst_from_image(filtered_col.first().clip(box_area)),
-                lst_from_image(filtered_col.median().clip(box_area)),
-            ),
+                lst_from_image(filtered_col.first()).clip(box_area),
+                lst_from_image(filtered_col.median()).clip(box_area)
+            )
         )
-        return ee.Image(lst_image)
-
-    # st.write("DEBUG: Computing LST image")
-    lst_image = robust_compute_lst(filtered_col, box_area)
-
+    )
     # STEP 2: PROCESS OPENET ET DATA
     # st.write("DEBUG: Processing OpenET data")
     et_collection = (
@@ -955,12 +968,13 @@ def add_landsat_lst_et(s2_image):
 
     # st.write(f"DEBUG: OpenET collection size")
     et_monthly = et_collection.mean().select("et_ensemble_mad").rename("ET")
-
-    et_final = ee.Algorithms.If(
-        et_collection.size().eq(0), ee.Image.constant(99).rename("ET").clip(box_area), et_monthly.clip(box_area)
+    et_final = ee.Image(
+        ee.Algorithms.If(
+            et_collection.size().eq(0),
+            ee.Image.constant(0).toFloat().selfMask().rename('ET').clip(box_area),
+            et_monthly.clip(box_area)
+        )
     )
-
-    et_final = ee.Image(et_final)
 
     # STEP 3: ADD BANDS BACK TO SENTINEL-2 IMAGE
     # st.write("DEBUG: Adding bands back to Sentinel-2 image")
