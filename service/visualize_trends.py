@@ -426,7 +426,7 @@ def add_upstream_downstream_elevation_band(image, box, filtered_waterway):
     return full_image.addBands(downstream_rename).addBands(upstream_rename).addBands(elevation_masked2)
 
 
-def s2_export_for_visual(dam_collection, elevation_function, filtered_waterway=None):
+def s2_export_for_visual(dam_collection, elevation_function, filtered_waterway=None) -> ee.ImageCollection:
     """Apply the required transformations and filtration to the images"""
 
     def extract_pixels(box):
