@@ -18,10 +18,11 @@ from service.negative_sampling import (
     prepare_hydro,
 )
 from service.visualize_trends import (
-    s2_export_for_visual,
     add_elevation_band,
     add_landsat_lst_et,
+    add_upstream_downstream_elevation_band,
     compute_all_metrics_lst_et,
+    s2_export_for_visual,
 )
 from pages.analyze_impacts import (
     create_buffers,
@@ -220,6 +221,32 @@ def test_create_buffers(mock_streamlit):
     assert 'Point_geo' in props
 
 
+def test_date_standardization_by_create_buffers():
+    """Test Survey_Date handling in buffer creation"""
+    merged_fc = ee.FeatureCollection([
+        ee.Feature(ee.Geometry.Point([-123.0, 44.0]), {
+            "Dam": "positive",
+            "date": "2020-07-01",
+            "id_property": "P1"
+        })
+    ])
+
+    st.session_state['Merged_collection'] = merged_fc
+    st.session_state['Positive_collection'] = merged_fc
+
+    result = create_buffers(150)
+    first = result.first()
+
+    # Check Survey_Date is set
+    survey_date = first.get('Survey_Date').getInfo()
+    assert survey_date is not None
+
+    # Check formatted date
+    damdate = first.get('Damdate').getInfo()
+    assert 'DamDate_' in damdate
+    assert '20200701' in damdate
+
+
 def test_s2_export_for_visual():
     """Test s2_export_for_visual function"""
     # Create small buffered collection
@@ -322,3 +349,69 @@ def test_end_to_end_small_dataset(mock_streamlit):
     hydro_raster = prepare_hydro(waterway)
     negatives = sample_negative_points(dam_fc, hydro_raster, 300, 500, 10)
     assert negatives.size().getInfo() > 0
+
+
+def test_upstream_downstream(mock_streamlit):
+    """Test upstream/downstream analysis"""
+
+    dam_data = [
+        {"date": "2020-06-15", "DamID": "24", "latitude": 35.95997899451,
+         "longitude": -118.180696749346, "Dam": "positive"},
+        {"date": "2020-06-15", "DamID": "23", "latitude": 35.9707477235541,
+         "longitude": -118.183876088397, "Dam": "positive"}
+    ]
+
+    # Transform to buffered FeatureCollection (matching your pipeline)
+    buffered_features = []
+    for dam in dam_data:
+        point = ee.Geometry.Point([dam['longitude'], dam['latitude']])
+        buffered_geom = point.buffer(200)  # 200m buffer
+
+        feature = ee.Feature(buffered_geom, {
+            "Dam": dam["Dam"],
+            "Survey_Date": dam["date"],
+            "id_property": dam["DamID"],
+            "Point_geo": point
+        })
+        buffered_features.append(feature)
+
+    dam_fc = ee.FeatureCollection(buffered_features)
+
+    waterway = ee.FeatureCollection("projects/sat-io/open-datasets/NHD/NHD_CA/NHDFlowline")
+    waterway_filtered = waterway.filterBounds(dam_fc.geometry().bounds().buffer(1000))
+
+    # Verify waterway exists in this area
+    waterway_count = waterway_filtered.size().getInfo()
+    if waterway_count == 0:
+        pytest.skip("No waterway data found for California test location")
+
+    # Now run through the actual pipeline
+    # This calls s2_export_for_visual which internally:
+    # 1. Filters S2 imagery by date and bounds
+    # 2. Adds cloud masks
+    # 3. Gets monthly medians
+    # 4. Sets required properties (DamGeo, boxArea, damId, DamStatus)
+    image_collection = s2_export_for_visual(
+        dam_fc,
+        add_upstream_downstream_elevation_band,
+        waterway_filtered
+    )
+
+    ic_size = image_collection.size().getInfo()
+    if ic_size == 0:
+        pytest.skip("No Sentinel-2 imagery available for test date/location")
+
+    # Get first image and verify it has the upstream/downstream bands
+    first_image = image_collection.first()
+    bands = first_image.bandNames().getInfo()
+
+    # Verify that the upstream and downstream mask bands have been added
+    assert 'upstream' in bands, f"Missing upstream band. Available bands: {bands}"
+    assert 'downstream' in bands, f"Missing downstream band. Available bands: {bands}"
+
+    # Verify the image has required metadata
+    props = first_image.propertyNames().getInfo()
+    assert 'Dam_id' in props
+    assert 'Dam_status' in props
+    assert 'Image_month' in props
+    assert 'Image_year' in props
