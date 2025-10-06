@@ -1,6 +1,6 @@
-import streamlit as st
+"""Landing page describing the lab and how to use the tool"""
 
-# st.title("About the Beaver Lab")
+import streamlit as st
 
 st.markdown(
     """

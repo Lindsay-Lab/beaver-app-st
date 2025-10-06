@@ -64,12 +64,6 @@ def validate_dam_waterway_distance(
             )
         )
 
-        # Add debug information
-        # st.write("Debug: Distance validation")
-        # st.write(f"Total dams processed: {dam_collection.size().getInfo()}")
-        # st.write(f"Valid dams count: {valid_dams.size().getInfo()}")
-        # st.write(f"Invalid dams count: {invalid_dams.size().getInfo()}")
-
         return {
             "valid_dams": valid_dams,
             "invalid_dams": invalid_dams,
@@ -103,11 +97,6 @@ def check_waterway_intersection(dam_collection: ee.FeatureCollection, waterway_f
 
         # Get intersecting dams
         intersecting_dams = dams_with_intersection.filter(ee.Filter.eq("intersection_valid", 1))
-
-        # Add debug information
-        # st.write("Debug: Intersection validation")
-        # st.write(f"Total dams checked: {dam_collection.size().getInfo()}")
-        # st.write(f"Intersecting dams count: {intersecting_dams.size().getInfo()}")
 
         return {"intersecting_dams": intersecting_dams, "intersecting_count": intersecting_dams.size()}
     except Exception as e:
@@ -182,13 +171,11 @@ def visualize_validation_results(
         if "valid_dams" in validation_results:
             valid_dams = validation_results["valid_dams"]
             map_obj.addLayer(valid_dams, {"color": "green", "pointSize": 5}, "Valid Dams")
-            # st.write(f"Debug: Valid dams count: {valid_dams.size().getInfo()}")
 
         # Add invalid dams in red
         if "invalid_dams" in validation_results:
             invalid_dams = validation_results["invalid_dams"]
             map_obj.addLayer(invalid_dams, {"color": "red", "pointSize": 5}, "Invalid Dams")
-            # st.write(f"Debug: Invalid dams count: {invalid_dams.size().getInfo()}")
 
         # Center the map on the dam collection
         map_obj.centerObject(dam_collection)

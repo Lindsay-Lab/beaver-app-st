@@ -250,10 +250,7 @@ def create_ee_features_from_geojson(geojson, date):
 def display_year_selector_with_warning(widget_prefix, suffix=""):
     """Show year selector and ET data warnings, return selected date"""
     selected_year = st.selectbox(
-        "Select a year:",
-        list(range(2017, 2025)),
-        index=3,
-        key=f"{widget_prefix}{suffix}_year_selectbox"
+        "Select a year:", list(range(2017, 2025)), index=3, key=f"{widget_prefix}{suffix}_year_selectbox"
     )
     selected_date = f"{selected_year}-07-01"
 
