@@ -2,7 +2,11 @@
 Constants and default values for the app.
 """
 
+
+# pylint: disable=too-few-public-methods
 class AppConstants:
+    """simple container for constants and default values"""
+
     # Buffer settings
     DEFAULT_BUFFER_RADIUS = 150
     MIN_BUFFER_RADIUS = 1
@@ -39,7 +43,6 @@ class AppConstants:
         # Questionnaire state
         "questionnaire_shown": False,
         "survey_clicked": False,
-
         # Data collections
         "Positive_collection": None,
         "Dam_data": None,
@@ -49,10 +52,8 @@ class AppConstants:
         "validation_results": None,
         "df_lst": None,
         "fig": None,
-
         # Configuration
         "buffer_radius": DEFAULT_BUFFER_RADIUS,
-
         # Boolean flags
         "validation_complete": False,
         "use_all_dams": True,
@@ -61,7 +62,6 @@ class AppConstants:
         "dataset_loaded": False,
         "buffers_created": False,
         "visualization_complete": False,
-
         # Workflow state
         "validation_step": "initial",
     }

@@ -15,7 +15,7 @@ def deduplicate_locations(orig_set):
     return ee.FeatureCollection(centroids)
 
 
-def prepare_hydro(waterway_fc):
+def prepare_hydro(waterway_fc) -> ee.Image:
     """
     Convert a lines/polygons FeatureCollection (hydro) to a raster image
     for sampling, with 'hydro_mask' band = 1 where waterway is present.

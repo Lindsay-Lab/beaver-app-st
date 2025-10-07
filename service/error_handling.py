@@ -1,8 +1,11 @@
-import streamlit as st
+"""Error handling utilities for the streamlit app"""
+
 import traceback
+from contextlib import contextmanager
 from functools import wraps
 from typing import Callable, Any, Optional
-from contextlib import contextmanager
+
+import streamlit as st
 
 
 def handle_processing_errors(operation_name: str, show_details: bool = True):
@@ -84,8 +87,8 @@ def handle_file_processing_error(filename: str, error: Exception):
             [
                 "Check that your file is a valid CSV or GeoJSON",
                 "Ensure coordinate columns are named correctly",
-                "Verify the file isn't corrupted"
-            ]
+                "Verify the file isn't corrupted",
+            ],
         )
     elif "coordinate" in error_msg or "geometry" in error_msg:
         display_validation_error(
@@ -93,16 +96,13 @@ def handle_file_processing_error(filename: str, error: Exception):
             [
                 "Check that coordinates are in decimal degrees",
                 "Ensure latitude is between -90 and 90",
-                "Ensure longitude is between -180 and 180"
-            ]
+                "Ensure longitude is between -180 and 180",
+            ],
         )
     elif "empty" in error_msg or "no data" in error_msg:
         display_validation_error(
             f"No valid data found in '{filename}'",
-            [
-                "Check that the file contains data rows",
-                "Verify column headers match expected format"
-            ]
+            ["Check that the file contains data rows", "Verify column headers match expected format"],
         )
     else:
         st.error(f"Error processing file '{filename}': {str(error)}")

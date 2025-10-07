@@ -29,8 +29,10 @@ Note:
     This module depends on constants.py for default values and assumes
     Streamlit's session_state is available in the global context.
 """
-import streamlit as st
+
 from typing import Any, Optional, Dict, List
+
+import streamlit as st
 import ee
 
 from service.constants import AppConstants
@@ -48,7 +50,7 @@ class SessionStateManager:
     @staticmethod
     def _init_basic_state():
         """Initialize basic state from constants"""
-        if hasattr(AppConstants, 'SESSION_DEFAULTS'):
+        if hasattr(AppConstants, "SESSION_DEFAULTS"):
             for key, default_value in AppConstants.SESSION_DEFAULTS.items():
                 if key not in st.session_state:
                     st.session_state[key] = default_value
@@ -65,8 +67,12 @@ class SessionStateManager:
     def reset_workflow():
         """Reset workflow-related state (useful for starting over)."""
         workflow_keys = [
-            "validation_complete", "buffer_complete", "buffers_created",
-            "visualization_complete", "show_non_dam_section", "upstream_analysis_complete"
+            "validation_complete",
+            "buffer_complete",
+            "buffers_created",
+            "visualization_complete",
+            "show_non_dam_section",
+            "upstream_analysis_complete",
         ]
         for key in workflow_keys:
             st.session_state[key] = False
@@ -105,21 +111,21 @@ class SessionStateManager:
     @staticmethod
     def complete_step(step_num: int) -> None:
         """Mark a step as complete"""
-        st.session_state[f'step{step_num}_complete'] = True
+        st.session_state[f"step{step_num}_complete"] = True
 
     @staticmethod
     def is_step_complete(step_num: int) -> bool:
         """Check if a step is complete"""
-        return st.session_state.get(f'step{step_num}_complete', False)
+        return st.session_state.get(f"step{step_num}_complete", False)
 
     @staticmethod
     def get_completed_steps() -> List[int]:
         """Get list of completed step numbers"""
         completed = []
         for key in st.session_state.keys():
-            if key.endswith('_complete') and key.startswith('step'):
+            if key.endswith("_complete") and key.startswith("step"):
                 try:
-                    step_num = int(key.split('step')[1].split('_')[0])
+                    step_num = int(key.split("step")[1].split("_")[0])
                     if st.session_state[key]:
                         completed.append(step_num)
                 except (IndexError, ValueError):
@@ -130,12 +136,16 @@ class SessionStateManager:
     def reset_from_step(step_num: int, max_steps: int = 6) -> None:
         """Reset all steps from given step number onwards"""
         for i in range(step_num, max_steps + 1):
-            SessionStateManager.set(f'step{i}_complete', False)
+            SessionStateManager.set(f"step{i}_complete", False)
 
         # Reset related state variables
         state_to_reset = [
-            'validation_complete', 'validation_step', 'visualization_complete',
-            'upstream_analysis_complete', 'buffer_complete', 'show_non_dam_section'
+            "validation_complete",
+            "validation_step",
+            "visualization_complete",
+            "upstream_analysis_complete",
+            "buffer_complete",
+            "show_non_dam_section",
         ]
         for key in state_to_reset:
             if key in st.session_state:
@@ -159,7 +169,7 @@ class SessionStateManager:
                 return f"Missing required data: {description}"
 
             # For Earth Engine FeatureCollections, check if they have features
-            if hasattr(data, 'size'):
+            if hasattr(data, "size"):
                 try:
                     size = data.size().getInfo()
                     if size == 0:
@@ -172,33 +182,33 @@ class SessionStateManager:
     @staticmethod
     def get_dam_data() -> Optional[ee.FeatureCollection]:
         """Get dam data from session state"""
-        return SessionStateManager.get('Dam_data')
+        return SessionStateManager.get("Dam_data")
 
     @staticmethod
     def get_positive_collection() -> Optional[ee.FeatureCollection]:
         """Get positive dam collection from session state"""
-        return SessionStateManager.get('Positive_collection')
+        return SessionStateManager.get("Positive_collection")
 
     @staticmethod
     def get_waterway_data() -> Optional[ee.FeatureCollection]:
         """Get waterway data from session state"""
-        return SessionStateManager.get('Waterway')
+        return SessionStateManager.get("Waterway")
 
     @staticmethod
     def get_merged_collection() -> Optional[ee.FeatureCollection]:
         """Get merged collection from session state"""
-        return SessionStateManager.get('Merged_collection')
+        return SessionStateManager.get("Merged_collection")
 
     @staticmethod
     def get_analysis_summary() -> Dict[str, Any]:
         """Get summary of current analysis state"""
         return {
-            'completed_steps': SessionStateManager.get_completed_steps(),
-            'has_dam_data': SessionStateManager.get_dam_data() is not None,
-            'has_waterway_data': SessionStateManager.get_waterway_data() is not None,
-            'validation_status': SessionStateManager.get('validation_step'),
-            'buffer_radius': SessionStateManager.get('buffer_radius'),
-            'use_all_dams': SessionStateManager.get('use_all_dams'),
+            "completed_steps": SessionStateManager.get_completed_steps(),
+            "has_dam_data": SessionStateManager.get_dam_data() is not None,
+            "has_waterway_data": SessionStateManager.get_waterway_data() is not None,
+            "validation_status": SessionStateManager.get("validation_step"),
+            "buffer_radius": SessionStateManager.get("buffer_radius"),
+            "use_all_dams": SessionStateManager.get("use_all_dams"),
         }
 
 

@@ -1,3 +1,5 @@
+"""Primary page for analyzing dam impacts"""
+
 import io
 
 import ee
@@ -15,7 +17,7 @@ from service.error_handling import (
     display_validation_error,
     display_success_message,
     display_warning_with_options,
-    handle_file_processing_error
+    handle_file_processing_error,
 )
 from service.load_datasets import load_nhd_collections
 from service.negative_sampling import prepare_hydro, sample_negative_points
@@ -27,12 +29,14 @@ from service.validation import (
     validate_dam_waterway_distance,
     visualize_validation_results,
 )
+
 from service.visualize_trends import (
     s2_export_for_visual,
-    s2_export_for_visual_flowdir,
     add_landsat_lst_et,
     compute_all_metrics_lst_et,
     compute_all_metrics_up_downstream,
+    add_upstream_downstream_elevation_band,
+    add_elevation_band,
 )
 
 
@@ -40,10 +44,11 @@ from service.visualize_trends import (
 initialize_earth_engine()
 SessionStateManager.initialize()
 
+
 def main():
     """Main application function"""
     # Show questionnaire if not shown
-    if not SessionStateManager.get('questionnaire_shown', False):
+    if not SessionStateManager.get("questionnaire_shown", False):
         show_questionnaire()
         return
 
@@ -59,26 +64,26 @@ def main():
         render_step1()
 
     with st.expander(
-            "Step 2: Select Waterway",
-            expanded=SessionStateManager.is_step_complete(1) and not SessionStateManager.is_step_complete(2)
+        "Step 2: Select Waterway",
+        expanded=SessionStateManager.is_step_complete(1) and not SessionStateManager.is_step_complete(2),
     ):
         render_step2()
 
     with st.expander(
-            "Step 3: Validate Dam Locations",
-            expanded=SessionStateManager.is_step_complete(2) and not SessionStateManager.is_step_complete(3)
+        "Step 3: Validate Dam Locations",
+        expanded=SessionStateManager.is_step_complete(2) and not SessionStateManager.is_step_complete(3),
     ):
         render_step3()
 
     with st.expander(
-            "Step 4: Upload or Generate Non-Dam Locations",
-            expanded=SessionStateManager.is_step_complete(3) and not SessionStateManager.is_step_complete(4)
+        "Step 4: Upload or Generate Non-Dam Locations",
+        expanded=SessionStateManager.is_step_complete(3) and not SessionStateManager.is_step_complete(4),
     ):
         render_step4()
 
     with st.expander(
-            "Step 5: Create Buffers",
-            expanded=SessionStateManager.is_step_complete(4) and not SessionStateManager.is_step_complete(5)
+        "Step 5: Create Buffers",
+        expanded=SessionStateManager.is_step_complete(4) and not SessionStateManager.is_step_complete(5),
     ):
         render_step5()
 
@@ -90,6 +95,7 @@ def main():
         "You can make the Beaver Impacts Tool better by filling out our "
         "[feedback form](https://docs.google.com/forms/d/e/1FAIpQLSeE1GP7OptA4-z8Melz2AHxNsddtL9ZgJVXdVVtxLsrljJ10Q/viewform?usp=sharing)."
     )
+
 
 def show_questionnaire():
     """Display initial questionnaire section"""
@@ -103,7 +109,7 @@ def show_questionnaire():
     )
 
     if st.button("I have opened the survey and will fill it out after trying the web tool.", type="primary"):
-        SessionStateManager.set('questionnaire_shown', True)
+        SessionStateManager.set("questionnaire_shown", True)
         st.rerun()
 
 
@@ -112,10 +118,12 @@ def process_dam_upload(uploaded_file):
     """Process uploaded dam location file"""
     feature_collection = upload_points_to_ee(uploaded_file, widget_prefix="Dam")
     if feature_collection:
-        SessionStateManager.set_multiple({
-            'Positive_collection': feature_collection,
-            'Full_positive': feature_collection,
-        })
+        SessionStateManager.set_multiple(
+            {
+                "Positive_collection": feature_collection,
+                "Full_positive": feature_collection,
+            }
+        )
         SessionStateManager.complete_step(1)
         return feature_collection
     return None
@@ -125,11 +133,7 @@ def render_step1():
     """Step 1: Upload Dam Locations"""
     st.header("Step 1: Upload Dam Locations")
 
-    uploaded_file = st.file_uploader(
-        "Choose a CSV or GeoJSON file",
-        type=["csv", "geojson"],
-        key="Dam_file_uploader"
-    )
+    uploaded_file = st.file_uploader("Choose a CSV or GeoJSON file", type=["csv", "geojson"], key="Dam_file_uploader")
 
     if uploaded_file:
         with safe_processing("Processing uploaded file", show_spinner=True):
@@ -152,7 +156,7 @@ def render_step1():
 @handle_processing_errors("waterway dataset loading")
 def load_waterway_data():
     """Load waterway dataset based on dam locations"""
-    full_positive = SessionStateManager.get('Full_positive')
+    full_positive = SessionStateManager.get("Full_positive")
     if not full_positive:
         return None
 
@@ -161,13 +165,13 @@ def load_waterway_data():
     states_dataset = ee.FeatureCollection("TIGER/2018/States")
     states_with_dams = states_dataset.filterBounds(positive_dam_bounds)
 
-    SessionStateManager.set('Positive_dam_state', states_with_dams)
+    SessionStateManager.set("Positive_dam_state", states_with_dams)
     state_names = states_with_dams.aggregate_array("NAME").getInfo()
 
     if not state_names:
         display_validation_error(
             "No states found within the dam data bounds.",
-            ["Check that your dam coordinates are valid", "Ensure coordinates are in the correct format"]
+            ["Check that your dam coordinates are valid", "Ensure coordinates are in the correct format"],
         )
         return None
 
@@ -178,19 +182,17 @@ def load_waterway_data():
 
     if nhd_collections:
         merged_nhd = ee.FeatureCollection(nhd_collections).flatten()
-        SessionStateManager.set_multiple({
-            'selected_waterway': merged_nhd,
-            'Waterway': merged_nhd,
-            'dataset_loaded': True
-        })
+        SessionStateManager.set_multiple(
+            {"selected_waterway": merged_nhd, "Waterway": merged_nhd, "dataset_loaded": True}
+        )
         SessionStateManager.complete_step(2)
         return merged_nhd
-    else:
-        display_validation_error(
-            "No NHD datasets found for the selected states.",
-            ["Try using the alternative waterway dataset", "Check that your dam locations are in supported areas"]
-        )
-        return None
+
+    display_validation_error(
+        "No NHD datasets found for the selected states.",
+        ["Try using the alternative waterway dataset", "Check that your dam locations are in supported areas"],
+    )
+    return None
 
 
 def render_alternative_waterway_options():
@@ -201,16 +203,11 @@ def render_alternative_waterway_options():
     choose_other_checkbox = st.checkbox("Use Alternative Waterway Map")
 
     if upload_own_checkbox:
-        asset_id = st.text_input(
-            "Enter GEE Asset Table ID (e.g., projects/ee-beaver-lab/assets/Hydro/MA_Hydro_arc):"
-        )
+        asset_id = st.text_input("Enter GEE Asset Table ID (e.g., projects/ee-beaver-lab/assets/Hydro/MA_Hydro_arc):")
         if st.button("Load Custom Dataset"):
             with safe_processing("Loading custom dataset"):
                 waterway_own = ee.FeatureCollection(asset_id)
-                SessionStateManager.set_multiple({
-                    'selected_waterway': waterway_own,
-                    'dataset_loaded': True
-                })
+                SessionStateManager.set_multiple({"selected_waterway": waterway_own, "dataset_loaded": True})
                 SessionStateManager.complete_step(2)
                 display_success_message("Custom dataset successfully loaded.")
 
@@ -220,10 +217,10 @@ def render_alternative_waterway_options():
         if st.button("Load Alternative Map"):
             with safe_processing("Loading alternative dataset"):
                 if dataset_option == "WWF Free Flowing Rivers":
-                    states_with_dams = SessionStateManager.get('Positive_dam_state')
+                    states_with_dams = SessionStateManager.get("Positive_dam_state")
                     wwf_dataset = ee.FeatureCollection("WWF/HydroSHEDS/v1/FreeFlowingRivers")
                     clipped_wwf = wwf_dataset.filterBounds(states_with_dams)
-                    SessionStateManager.set('selected_waterway', clipped_wwf)
+                    SessionStateManager.set("selected_waterway", clipped_wwf)
                     SessionStateManager.complete_step(2)
                     display_success_message("WWF dataset successfully loaded.")
 
@@ -250,13 +247,10 @@ def render_step2():
             # Display map
             waterway_map = geemap.Map()
             waterway_map.add_basemap("SATELLITE")
-            waterway_map.centerObject(SessionStateManager.get('Full_positive'))
+            waterway_map.centerObject(SessionStateManager.get("Full_positive"))
             waterway_map.addLayer(waterway, {"color": "blue"}, "Selected Waterway")
-            waterway_map.addLayer(SessionStateManager.get('Full_positive'), {"color": "red"}, "Dams")
-            waterway_map.to_streamlit(
-                width=AppConstants.LARGE_MAP_WIDTH,
-                height=AppConstants.LARGE_MAP_HEIGHT
-            )
+            waterway_map.addLayer(SessionStateManager.get("Full_positive"), {"color": "red"}, "Dams")
+            waterway_map.to_streamlit(width=AppConstants.LARGE_MAP_WIDTH, height=AppConstants.LARGE_MAP_HEIGHT)
 
             render_alternative_waterway_options()
 
@@ -264,23 +258,22 @@ def render_step2():
 @handle_processing_errors("dam location validation")
 def perform_dam_validation(max_distance):
     """Perform dam location validation"""
-    error_msg = SessionStateManager.validate_earth_engine_data({
-        "Full_positive": "Dam locations",
-        "Waterway": "Waterway data"
-    })
+    error_msg = SessionStateManager.validate_earth_engine_data(
+        {"Full_positive": "Dam locations", "Waterway": "Waterway data"}
+    )
 
     if error_msg:
         display_validation_error(error_msg)
         return None
 
-    full_positive = SessionStateManager.get('Full_positive')
-    waterway = SessionStateManager.get('Waterway')
+    full_positive = SessionStateManager.get("Full_positive")
+    waterway = SessionStateManager.get("Waterway")
 
     # Perform distance validation
     distance_validation = validate_dam_waterway_distance(full_positive, waterway, max_distance)
 
     # Perform intersection validation
-    intersection_validation = check_waterway_intersection(full_positive, waterway)
+    _ = check_waterway_intersection(full_positive, waterway)
 
     # Combine validation results
     validation_results = {
@@ -303,7 +296,7 @@ def handle_validation_results(validation_results):
     if valid_count == 0:
         display_validation_error(
             "No valid dam locations found. All dams failed validation.",
-            ["Check your dam locations and waterway data", "Adjust the maximum distance parameter"]
+            ["Check your dam locations and waterway data", "Adjust the maximum distance parameter"],
         )
         return
 
@@ -312,41 +305,44 @@ def handle_validation_results(validation_results):
             "Some dam locations have been identified as potentially invalid. "
             "Please review the validation report and map above. "
             "You can continue with all dams or only use the valid dams.",
-            {
-                "Continue with all dams": "use_all_dams_btn",
-                "Only use valid dams": "use_valid_dams_btn"
-            }
+            {"Continue with all dams": "use_all_dams_btn", "Only use valid dams": "use_valid_dams_btn"},
         )
 
         if options.get("use_all_dams_btn"):
-            SessionStateManager.set_multiple({
-                'validation_complete': True,
-                'use_all_dams': True,
-                'Dam_data': SessionStateManager.get('Full_positive'),
-                'show_non_dam_section': True,
-                'validation_step': 'completed'
-            })
+            SessionStateManager.set_multiple(
+                {
+                    "validation_complete": True,
+                    "use_all_dams": True,
+                    "Dam_data": SessionStateManager.get("Full_positive"),
+                    "show_non_dam_section": True,
+                    "validation_step": "completed",
+                }
+            )
             display_success_message("Selected to continue with all dams.")
 
         elif options.get("use_valid_dams_btn"):
             valid_dams = validation_results["valid_dams"]
-            SessionStateManager.set_multiple({
-                'Full_positive': valid_dams,
-                'validation_step': 'completed',
-                'validation_complete': True,
-                'use_all_dams': False,
-                'Dam_data': valid_dams,
-                'show_non_dam_section': True
-            })
+            SessionStateManager.set_multiple(
+                {
+                    "Full_positive": valid_dams,
+                    "validation_step": "completed",
+                    "validation_complete": True,
+                    "use_all_dams": False,
+                    "Dam_data": valid_dams,
+                    "show_non_dam_section": True,
+                }
+            )
             display_success_message(f"Successfully filtered to {valid_count} valid dams.")
     else:
-        SessionStateManager.set_multiple({
-            'validation_complete': True,
-            'use_all_dams': True,
-            'Dam_data': SessionStateManager.get('Full_positive'),
-            'show_non_dam_section': True,
-            'validation_step': 'completed'
-        })
+        SessionStateManager.set_multiple(
+            {
+                "validation_complete": True,
+                "use_all_dams": True,
+                "Dam_data": SessionStateManager.get("Full_positive"),
+                "show_non_dam_section": True,
+                "validation_step": "completed",
+            }
+        )
         display_success_message("All dams are valid.")
 
     SessionStateManager.complete_step(3)
@@ -362,7 +358,7 @@ def render_step3():
         return
 
     # Only show validation section if validation is not complete
-    if not SessionStateManager.get('validation_complete', False):
+    if not SessionStateManager.get("validation_complete", False):
         max_distance = st.number_input(
             "Maximum allowed distance from waterway (meters):",
             min_value=AppConstants.MIN_MAX_DISTANCE,
@@ -377,10 +373,9 @@ def render_step3():
 
                 if validation_results:
                     # Store validation results and display report
-                    SessionStateManager.set_multiple({
-                        'validation_results': validation_results,
-                        'validation_step': 'show_options'
-                    })
+                    SessionStateManager.set_multiple(
+                        {"validation_results": validation_results, "validation_step": "show_options"}
+                    )
 
                     st.subheader("Validation Report")
                     st.text(generate_validation_report(validation_results))
@@ -388,18 +383,17 @@ def render_step3():
                     # Display validation map
                     st.subheader("Validation Map")
                     validation_map = visualize_validation_results(
-                        SessionStateManager.get('Full_positive'),
-                        SessionStateManager.get('Waterway'),
-                        validation_results
+                        SessionStateManager.get("Full_positive"),
+                        SessionStateManager.get("Waterway"),
+                        validation_results,
                     )
                     validation_map.to_streamlit(
-                        width=AppConstants.LARGE_MAP_WIDTH,
-                        height=AppConstants.LARGE_MAP_HEIGHT
+                        width=AppConstants.LARGE_MAP_WIDTH, height=AppConstants.LARGE_MAP_HEIGHT
                     )
 
     # Show options after validation is complete
-    if SessionStateManager.get('validation_step') == 'show_options':
-        validation_results = SessionStateManager.get('validation_results')
+    if SessionStateManager.get("validation_step") == "show_options":
+        validation_results = SessionStateManager.get("validation_results")
         if validation_results:
             handle_validation_results(validation_results)
 
@@ -407,9 +401,7 @@ def render_step3():
 @handle_processing_errors("non-dam data processing")
 def process_non_dam_upload(uploaded_file):
     """Process uploaded non-dam data"""
-    negative_feature_collection = upload_non_dam_points_to_ee(
-        uploaded_file, widget_prefix="NonDam"
-    )
+    negative_feature_collection = upload_non_dam_points_to_ee(uploaded_file, widget_prefix="NonDam")
 
     if not negative_feature_collection:
         return None
@@ -424,7 +416,7 @@ def process_non_dam_upload(uploaded_file):
         feature = ee.Feature(features_list.get(idx))
         date = feature.get("date")
         if not date:
-            first_pos = SessionStateManager.get('Positive_collection').first()
+            first_pos = SessionStateManager.get("Positive_collection").first()
             date = first_pos.get("date")
         return (
             feature.set("id_property", ee.String("N").cat(idx.add(1).int().format()))
@@ -435,8 +427,11 @@ def process_non_dam_upload(uploaded_file):
     neg_points_id = ee.FeatureCollection(indices.map(set_id_negatives2))
 
     # Process positive samples
-    pos_collection = (SessionStateManager.get('Dam_data') if not SessionStateManager.get('use_all_dams')
-                      else SessionStateManager.get('Positive_collection'))
+    pos_collection = (
+        SessionStateManager.get("Dam_data")
+        if not SessionStateManager.get("use_all_dams")
+        else SessionStateManager.get("Positive_collection")
+    )
     pos_collection = pos_collection.map(lambda feature: feature.set("Dam", "positive"))
 
     pos_features_list = pos_collection.toList(pos_collection.size())
@@ -447,25 +442,27 @@ def process_non_dam_upload(uploaded_file):
         feature = ee.Feature(pos_features_list.get(idx))
         date = feature.get("date")
         if not date:
-            first_pos = SessionStateManager.get('Positive_collection').first()
+            first_pos = SessionStateManager.get("Positive_collection").first()
             date = first_pos.get("date")
         return feature.set("id_property", ee.String("P").cat(idx.add(1).int().format())).set("date", date)
 
     positive_dam_id = ee.FeatureCollection(pos_indices.map(set_id_positives))
     merged_collection = positive_dam_id.merge(neg_points_id)
 
-    SessionStateManager.set_multiple({
-        'Merged_collection': merged_collection,
-        'Negative_upload_collection': negative_feature_collection,
-        'Full_negative': negative_feature_collection,
-        'buffer_complete': True
-    })
+    SessionStateManager.set_multiple(
+        {
+            "Merged_collection": merged_collection,
+            "Negative_upload_collection": negative_feature_collection,
+            "Full_negative": negative_feature_collection,
+            "buffer_complete": True,
+        }
+    )
     SessionStateManager.complete_step(4)
 
     return {
-        'negative_points': neg_points_id,
-        'positive_points': positive_dam_id,
-        'merged_collection': merged_collection
+        "negative_points": neg_points_id,
+        "positive_points": positive_dam_id,
+        "merged_collection": merged_collection,
     }
 
 
@@ -473,23 +470,25 @@ def process_non_dam_upload(uploaded_file):
 def generate_negative_points(inner_radius, outer_radius, sampling_scale):
     """Generate negative points using specified parameters"""
     # Validate required data
-    error_msg = SessionStateManager.validate_earth_engine_data({
-        "Positive_collection": "Dam locations",
-        "selected_waterway": "Waterway data"
-    })
+    error_msg = SessionStateManager.validate_earth_engine_data(
+        {"Positive_collection": "Dam locations", "selected_waterway": "Waterway data"}
+    )
 
     if error_msg:
         display_validation_error(error_msg)
         return None
 
     # Get positive dams
-    positive_dams_fc = (SessionStateManager.get('Dam_data') if not SessionStateManager.get('use_all_dams')
-                        else SessionStateManager.get('Positive_collection'))
+    positive_dams_fc = (
+        SessionStateManager.get("Dam_data")
+        if not SessionStateManager.get("use_all_dams")
+        else SessionStateManager.get("Positive_collection")
+    )
 
     if positive_dams_fc.size().getInfo() == 0:
         display_validation_error(
             "No valid dam data found.",
-            ["Check your data and try again", "Ensure previous steps completed successfully"]
+            ["Check your data and try again", "Ensure previous steps completed successfully"],
         )
         return None
 
@@ -501,25 +500,23 @@ def generate_negative_points(inner_radius, outer_radius, sampling_scale):
         display_validation_error("No valid dam locations found.")
         return None
 
-    waterway_fc = SessionStateManager.get('selected_waterway').filterBounds(positive_bounds)
+    waterway_fc = SessionStateManager.get("selected_waterway").filterBounds(positive_bounds)
 
     if waterway_fc.size().getInfo() == 0:
         display_validation_error(
             "No waterway data found within the dam locations area.",
-            ["Check your waterway selection", "Verify dam locations are correct"]
+            ["Check your waterway selection", "Verify dam locations are correct"],
         )
         return None
 
     # Prepare hydro raster and generate negative points
-    hydroRaster = prepare_hydro(waterway_fc)
-    negativePoints = sample_negative_points(
-        positive_dams_fc, hydroRaster, inner_radius, outer_radius, sampling_scale
-    )
+    hydro_raster = prepare_hydro(waterway_fc)
+    negative_points = sample_negative_points(positive_dams_fc, hydro_raster, inner_radius, outer_radius, sampling_scale)
 
-    if negativePoints.size().getInfo() == 0:
+    if negative_points.size().getInfo() == 0:
         display_validation_error(
             "No negative points were generated.",
-            ["Try adjusting the radius parameters", "Check that there's sufficient area for sampling"]
+            ["Try adjusting the radius parameters", "Check that there's sufficient area for sampling"],
         )
         return None
 
@@ -529,12 +526,10 @@ def generate_negative_points(inner_radius, outer_radius, sampling_scale):
     year_string = date.format("YYYY")
     full_date = ee.String(year_string).cat("-07-01")
 
-    negativePoints = negativePoints.map(
-        lambda feature: feature.set("Dam", "negative").set("date", full_date)
-    )
+    negative_points = negative_points.map(lambda feature: feature.set("Dam", "negative").set("date", full_date))
 
     # Process negative points with IDs
-    fc = negativePoints
+    fc = negative_points
     features_list = fc.toList(fc.size())
     indices = ee.List.sequence(0, fc.size().subtract(1))
 
@@ -558,16 +553,13 @@ def generate_negative_points(inner_radius, outer_radius, sampling_scale):
     positive_dam_id = ee.FeatureCollection(pos_indices.map(set_id_positives))
     merged_collection = positive_dam_id.merge(neg_points_id)
 
-    SessionStateManager.set_multiple({
-        'Merged_collection': merged_collection,
-        'buffer_complete': True
-    })
+    SessionStateManager.set_multiple({"Merged_collection": merged_collection, "buffer_complete": True})
     SessionStateManager.complete_step(4)
 
     return {
-        'negative_points': neg_points_id,
-        'positive_points': positive_dam_id,
-        'merged_collection': merged_collection
+        "negative_points": neg_points_id,
+        "positive_points": positive_dam_id,
+        "merged_collection": merged_collection,
     }
 
 
@@ -580,16 +572,16 @@ def render_step4():
         show_prerequisite_error("Step 4", [3])
         return
 
-    if not SessionStateManager.get('validation_complete', False):
+    if not SessionStateManager.get("validation_complete", False):
         display_validation_error("Please complete the validation step first.")
         return
 
-    if not SessionStateManager.get('show_non_dam_section', False):
+    if not SessionStateManager.get("show_non_dam_section", False):
         display_validation_error("Please complete the validation step first.")
         return
 
     # Display current dam usage status
-    if SessionStateManager.get('use_all_dams'):
+    if SessionStateManager.get("use_all_dams"):
         st.info("Using all dam locations for analysis")
     else:
         st.info("Using only valid dam locations for analysis")
@@ -599,9 +591,7 @@ def render_step4():
 
     if upload_negatives_checkbox:
         uploaded_negatives = st.file_uploader(
-            "Upload Non-Dam Dataset (CSV or GeoJSON)",
-            type=["csv", "geojson"],
-            key="negative_file_uploader"
+            "Upload Non-Dam Dataset (CSV or GeoJSON)", type=["csv", "geojson"], key="negative_file_uploader"
         )
 
         if uploaded_negatives:
@@ -615,9 +605,9 @@ def render_step4():
                         st.subheader("Data Preview")
                         preview_map = geemap.Map()
                         preview_map.add_basemap("SATELLITE")
-                        preview_map.addLayer(result['negative_points'], {"color": "red"}, "Non-dam locations")
-                        preview_map.addLayer(result['positive_points'], {"color": "blue"}, "Dam locations")
-                        preview_map.centerObject(result['merged_collection'])
+                        preview_map.addLayer(result["negative_points"], {"color": "red"}, "Non-dam locations")
+                        preview_map.addLayer(result["positive_points"], {"color": "blue"}, "Dam locations")
+                        preview_map.centerObject(result["merged_collection"])
                         preview_map.to_streamlit(width=AppConstants.MAP_WIDTH, height=AppConstants.MAP_HEIGHT)
                 except Exception as e:
                     handle_file_processing_error(uploaded_negatives.name, e)
@@ -631,14 +621,14 @@ def render_step4():
             value=AppConstants.DEFAULT_INNER_RADIUS,
             min_value=0,
             step=AppConstants.RADIUS_STEP,
-            key="inner_radius_input"
+            key="inner_radius_input",
         )
         outer_radius = st.number_input(
             "Outer Radius (meters)",
             value=AppConstants.DEFAULT_OUTER_RADIUS,
             min_value=0,
             step=AppConstants.RADIUS_STEP,
-            key="outer_radius_input"
+            key="outer_radius_input",
         )
         sampling_scale = AppConstants.SAMPLING_SCALE
 
@@ -652,28 +642,21 @@ def render_step4():
                     # Create and display the map
                     negative_points_map = geemap.Map()
                     negative_points_map.add_basemap("SATELLITE")
-                    negative_points_map.addLayer(result['negative_points'], {"color": "red", "width": 2}, "Negative")
-                    negative_points_map.addLayer(result['positive_points'], {"color": "blue"}, "Positive")
-                    negative_points_map.centerObject(result['merged_collection'])
+                    negative_points_map.addLayer(result["negative_points"], {"color": "red", "width": 2}, "Negative")
+                    negative_points_map.addLayer(result["positive_points"], {"color": "blue"}, "Positive")
+                    negative_points_map.centerObject(result["merged_collection"])
                     negative_points_map.to_streamlit(
-                        width=AppConstants.LARGE_MAP_WIDTH,
-                        height=AppConstants.LARGE_MAP_HEIGHT
+                        width=AppConstants.LARGE_MAP_WIDTH, height=AppConstants.LARGE_MAP_HEIGHT
                     )
 
 
 @handle_processing_errors("buffer creation")
 def create_buffers(buffer_radius):
     """Create buffers around merged collection points"""
-    merged_collection = SessionStateManager.get('Merged_collection')
+    merged_collection = SessionStateManager.get("Merged_collection")
     if not merged_collection:
         display_validation_error("No merged data found. Please complete Step 4 first.")
         return None
-
-    # Get date from first positive dam
-    first_pos = SessionStateManager.get('Positive_collection').first()
-    date = ee.Date(first_pos.get("date"))
-    year_string = date.format("YYYY")
-    full_date = ee.String(year_string).cat("-07-01")
 
     def add_dam_buffer_and_standardize_date(feature):
         dam_status = feature.get("Dam")
@@ -682,7 +665,7 @@ def create_buffers(buffer_radius):
         if not date:
             date = feature.get("Survey_Date")
             if not date:
-                first_pos = SessionStateManager.get('Positive_collection').first()
+                first_pos = SessionStateManager.get("Positive_collection").first()
                 date = first_pos.get("date")
 
         standardized_date = ee.Date(date)
@@ -691,21 +674,20 @@ def create_buffers(buffer_radius):
         # Create buffered geometry
         buffered_geometry = feature.geometry().buffer(buffer_radius)
 
-        return ee.Feature(buffered_geometry).set({
-            "Dam": dam_status,
-            "Survey_Date": standardized_date,
-            "Damdate": ee.String("DamDate_").cat(formatted_date),
-            "Point_geo": feature.geometry(),
-            "id_property": feature.get("id_property"),
-        })
+        return ee.Feature(buffered_geometry).set(
+            {
+                "Dam": dam_status,
+                "Survey_Date": standardized_date,
+                "Damdate": ee.String("DamDate_").cat(formatted_date),
+                "Point_geo": feature.geometry(),
+                "id_property": feature.get("id_property"),
+            }
+        )
 
     buffered_collection = merged_collection.map(add_dam_buffer_and_standardize_date)
     dam_data = buffered_collection.select(["id_property", "Dam", "Survey_Date", "Damdate", "Point_geo"])
 
-    SessionStateManager.set_multiple({
-        'Dam_data': dam_data,
-        'buffers_created': True
-    })
+    SessionStateManager.set_multiple({"Dam_data": dam_data, "buffers_created": True})
 
     return dam_data
 
@@ -719,11 +701,11 @@ def render_step5():
         show_prerequisite_error("Step 5", [4])
         return
 
-    if not SessionStateManager.get('step4_complete', False):
+    if not SessionStateManager.get("step4_complete", False):
         display_validation_error("Please complete Step 4 first.")
         return
 
-    if not SessionStateManager.has('Merged_collection'):
+    if not SessionStateManager.has("Merged_collection"):
         display_validation_error("No merged data found. Please complete Step 4 first.")
         return
 
@@ -734,7 +716,7 @@ def render_step5():
         "that are no more than 3m in elevation away from the dam location.",
         min_value=AppConstants.MIN_BUFFER_RADIUS,
         step=AppConstants.BUFFER_STEP,
-        value=SessionStateManager.get('buffer_radius'),
+        value=SessionStateManager.get("buffer_radius"),
         key="buffer_radius_input",
     )
 
@@ -763,7 +745,7 @@ def render_step5():
 @handle_processing_errors("combined effects analysis")
 def analyze_combined_effects():
     """Analyze combined effects of dams"""
-    dam_data = SessionStateManager.get('Dam_data')
+    dam_data = SessionStateManager.get("Dam_data")
     if not dam_data:
         display_validation_error("Dam data not found. Please complete previous steps.")
         return None
@@ -780,7 +762,7 @@ def analyze_combined_effects():
     if dam_data.size().getInfo() == 0:
         display_validation_error(
             "No valid data with dates found.",
-            ["Check your data for valid date fields", "Ensure date format is correct"]
+            ["Check your data for valid date fields", "Ensure date format is correct"],
         )
         return None
 
@@ -802,7 +784,7 @@ def analyze_combined_effects():
             dam_batch_fc = ee.FeatureCollection(dam_batch)
 
             # Process batch through pipeline
-            s2_cloud_mask_batch = ee.ImageCollection(s2_export_for_visual(dam_batch_fc))
+            s2_cloud_mask_batch = ee.ImageCollection(s2_export_for_visual(dam_batch_fc, add_elevation_band))
             s2_image_collection_batch = ee.ImageCollection(s2_cloud_mask_batch)
             s2_with_lst_batch = s2_image_collection_batch.map(add_landsat_lst_et)
             results_fc_lst_batch = s2_with_lst_batch.map(compute_all_metrics_lst_et)
@@ -848,29 +830,22 @@ def analyze_combined_effects():
 
     plt.tight_layout()
 
-    SessionStateManager.set_multiple({
-        'fig': fig,
-        'df_lst': df_lst,
-        'visualization_complete': True
-    })
+    SessionStateManager.set_multiple({"fig": fig, "df_lst": df_lst, "visualization_complete": True})
 
-    return {'figure': fig, 'dataframe': df_lst}
+    return {"figure": fig, "dataframe": df_lst}
 
 
 @handle_processing_errors("upstream downstream analysis")
 def analyze_upstream_downstream():
     """Analyze upstream and downstream effects"""
-    error_msg = SessionStateManager.validate_required_data({
-        "Dam_data": "Dam locations",
-        "Waterway": "Waterway data"
-    })
+    error_msg = SessionStateManager.validate_required_data({"Dam_data": "Dam locations", "Waterway": "Waterway data"})
 
     if error_msg:
         display_validation_error(error_msg)
         return None
 
-    dam_data = SessionStateManager.get('Dam_data')
-    waterway_fc = SessionStateManager.get('Waterway')
+    dam_data = SessionStateManager.get("Dam_data")
+    waterway_fc = SessionStateManager.get("Waterway")
 
     # Process in batches
     total_count = dam_data.size().getInfo()
@@ -890,7 +865,8 @@ def analyze_upstream_downstream():
             dam_batch_fc = ee.FeatureCollection(dam_batch)
 
             # Process through pipeline
-            s2_ic_batch = s2_export_for_visual_flowdir(dam_batch_fc, waterway_fc)
+            s2_ic_batch = s2_export_for_visual(dam_batch_fc, add_upstream_downstream_elevation_band, waterway_fc)
+
             s2_with_lst_et = s2_ic_batch.map(add_landsat_lst_et)
             results_batch = s2_with_lst_et.map(compute_all_metrics_up_downstream)
 
@@ -938,21 +914,17 @@ def analyze_upstream_downstream():
 
     plt.tight_layout()
 
-    SessionStateManager.set_multiple({
-        'fig2': fig2,
-        'final_df': final_df,
-        'upstream_analysis_complete': True
-    })
+    SessionStateManager.set_multiple({"fig2": fig2, "final_df": final_df, "upstream_analysis_complete": True})
 
-    return {'figure': fig2, 'dataframe': final_df}
+    return {"figure": fig2, "dataframe": final_df}
 
 
 def create_export_dataframe(df, include_coordinates=True):
     """Create export DataFrame with coordinates"""
     export_df = df.copy()
 
-    if include_coordinates and SessionStateManager.has('Dam_data'):
-        coords_df = extract_coordinates_df(SessionStateManager.get('Dam_data'))
+    if include_coordinates and SessionStateManager.has("Dam_data"):
+        coords_df = extract_coordinates_df(SessionStateManager.get("Dam_data"))
 
         if not coords_df.empty and "id_property" in export_df.columns:
             # For upstream/downstream data, we need to handle multiple rows per point
@@ -995,16 +967,16 @@ def render_step6():
     tab1, tab2 = st.tabs(["Combined Analysis", "Upstream & Downstream Analysis"])
 
     with tab1:
-        if not SessionStateManager.get('visualization_complete', False):
+        if not SessionStateManager.get("visualization_complete", False):
             if st.button("Analyze Combined Effects"):
                 with safe_processing("Analyzing combined effects"):
                     result = analyze_combined_effects()
                     if result:
                         display_success_message("Visualization complete!")
 
-        if SessionStateManager.get('visualization_complete', False):
-            fig = SessionStateManager.get('fig')
-            df_lst = SessionStateManager.get('df_lst')
+        if SessionStateManager.get("visualization_complete", False):
+            fig = SessionStateManager.get("fig")
+            df_lst = SessionStateManager.get("df_lst")
 
             if fig:
                 st.pyplot(fig)
@@ -1024,16 +996,16 @@ def render_step6():
                         st.download_button("Download Combined Data (CSV)", csv, "combined_data.csv", "text/csv")
 
     with tab2:
-        if not SessionStateManager.get('upstream_analysis_complete', False):
+        if not SessionStateManager.get("upstream_analysis_complete", False):
             if st.button("Analyze Upstream & Downstream Effects"):
                 with safe_processing("Analyzing Upstream & Downstream"):
                     result = analyze_upstream_downstream()
                     if result:
                         display_success_message("Upstream & downstream analysis completed successfully!")
 
-        if SessionStateManager.get('upstream_analysis_complete', False):
-            fig2 = SessionStateManager.get('fig2')
-            final_df = SessionStateManager.get('final_df')
+        if SessionStateManager.get("upstream_analysis_complete", False):
+            fig2 = SessionStateManager.get("fig2")
+            final_df = SessionStateManager.get("final_df")
 
             if fig2:
                 st.pyplot(fig2)
@@ -1049,7 +1021,7 @@ def render_step6():
                         buf2,
                         "upstream_downstream_trends.png",
                         "image/png",
-                        key="download_updown_fig"
+                        key="download_updown_fig",
                     )
 
                 with col4:
@@ -1061,7 +1033,7 @@ def render_step6():
                             csv2,
                             "upstream_downstream_data.csv",
                             "text/csv",
-                            key="download_updown_csv"
+                            key="download_updown_csv",
                         )
 
 
