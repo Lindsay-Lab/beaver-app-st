@@ -13,10 +13,19 @@ def streamlit_app():
         "--server.headless", "true"
     ])
 
-    # Wait for startup
-    time.sleep(5)
+    base_url = "http://localhost:8503"
 
-    yield "http://localhost:8503"
+    for _ in range(60):
+        try:
+            requests.get(f"{base_url}/healthz", timeout=1)
+            break
+        except Exception:
+            time.sleep(0.5)
+    else:
+        process.terminate()
+        raise RuntimeError("Streamlit app failed to start.")
+
+    yield base_url
 
     # Cleanup
     process.terminate()
