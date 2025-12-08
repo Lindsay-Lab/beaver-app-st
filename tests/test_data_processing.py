@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 from unittest.mock import patch
 
+from service.constants import AppConstants
 from service.parser import (
     clean_coordinate,
     csv_to_ee_features,
@@ -262,7 +263,7 @@ def test_s2_export_for_visual():
         )
     ])
 
-    image_collection = s2_export_for_visual(dam_fc, add_elevation_band)
+    image_collection = s2_export_for_visual(dam_fc, add_elevation_band, AppConstants.DEFAULT_ELEVATION_DISTANCE)
 
     # Check it returns ImageCollection
     assert isinstance(image_collection, ee.ImageCollection)
@@ -285,7 +286,7 @@ def test_add_landsat_lst_et():
         )
     ])
 
-    ic = s2_export_for_visual(dam_fc, add_elevation_band).limit(1)
+    ic = s2_export_for_visual(dam_fc, add_elevation_band, AppConstants.DEFAULT_ELEVATION_DISTANCE).limit(1)
     first_image = ic.first()
 
     result = add_landsat_lst_et(first_image)
@@ -310,7 +311,7 @@ def test_compute_all_metrics_lst_et():
         )
     ])
 
-    ic = s2_export_for_visual(dam_fc, add_elevation_band).limit(1)
+    ic = s2_export_for_visual(dam_fc, add_elevation_band, AppConstants.DEFAULT_ELEVATION_DISTANCE).limit(1)
     ic_with_bands = ic.map(add_landsat_lst_et)
 
     # Apply metrics computation
@@ -394,6 +395,7 @@ def test_upstream_downstream(mock_streamlit):
     image_collection = s2_export_for_visual(
         dam_fc,
         add_upstream_downstream_elevation_band,
+        AppConstants.DEFAULT_ELEVATION_DISTANCE,
         waterway_filtered
     )
 
