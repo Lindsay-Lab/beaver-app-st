@@ -326,7 +326,7 @@ The application creates several visualization types:
 ```python
 fig, axes = plt.subplots(4, 1, figsize=(12, 18))
 metrics = ['NDVI', 'NDWI_Green', 'LST', 'ET']
-titles = ['NDVI', 'NDWI Green', 'LST (°C)', 'ET']
+titles = ['NDVI', 'NDWI Green', 'LST (°C)', 'ET (mm)']
 
 for ax, metric, title in zip(axes, metrics, titles):
     sns.lineplot(data=df_lst, x="Image_month", y=metric, hue="Dam_status", 
