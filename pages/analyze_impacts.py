@@ -834,18 +834,22 @@ def analyze_combined_effects(elevation_dist):
     titles = ["NDVI", "NDWI Green", "LST (°C)", "ET (mm)"]
 
     for ax, metric, title in zip(axes, metrics, titles):
-        sns.lineplot(
-            data=df_lst,
-            x="Image_month",
-            y=metric,
-            hue="Dam_status",
-            style="Dam_status",
-            markers=True,
-            dashes=False,
-            ax=ax,
-        )
-        ax.set_title(f"{title} by Month", fontsize=14)
-        ax.set_xticks(range(1, 13))
+        try:
+            sns.lineplot(
+                data=df_lst,
+                x="Image_month",
+                y=metric,
+                hue="Dam_status",
+                style="Dam_status",
+                markers=True,
+                dashes=False,
+                ax=ax,
+            )
+            ax.set_title(f"{title} by Month", fontsize=14)
+            ax.set_xticks(range(1, 13))
+        except ValueError:
+            fig.delaxes(ax)
+            st.warning(f"Unable to create map for {title}.")
 
     plt.tight_layout()
 
@@ -930,7 +934,11 @@ def analyze_upstream_downstream(elevation_dist):
         ax.set_xticks(range(1, 13))
 
     for ax, met in zip(axes2, ["NDVI", "NDWI", "LST", "ET"]):
-        melt_and_plot(final_df, met, ax)
+        try:
+            melt_and_plot(final_df, met, ax)
+        except KeyError:
+            fig2.delaxes(ax)
+            st.warning(f"Unable to create map for {met}.")
 
     plt.tight_layout()
 
