@@ -186,7 +186,6 @@ def load_waterway_data():
         SessionStateManager.set_multiple(
             {"selected_waterway": merged_nhd, "dataset_loaded": True}
         )
-        SessionStateManager.complete_step(2)
         st.success(
             "Automatically loaded NHD dataset. If you want to use a different dataset, "
             "you can upload your own or use the alternative dataset."
@@ -215,7 +214,7 @@ def render_alternative_waterway_options():
         if st.button("Upload Custom Dataset"):
             with safe_processing("Loading custom dataset"):
                 waterway_own = upload_waterway_to_ee(uploaded_file)
-                SessionStateManager.set_multiple({"selected_waterway": waterway_own, "dataset_loaded": True})
+                SessionStateManager.set_multiple({"selected_waterway": waterway_own})
                 SessionStateManager.complete_step(2)
                 display_success_message("Dataset successfully uploaded.")
 
@@ -224,13 +223,12 @@ def render_alternative_waterway_options():
         if st.button("Load Custom Dataset"):
             with safe_processing("Loading custom dataset"):
                 waterway_own = ee.FeatureCollection(asset_id)
-                SessionStateManager.set_multiple({"selected_waterway": waterway_own, "dataset_loaded": True})
+                SessionStateManager.set_multiple({"selected_waterway": waterway_own})
                 SessionStateManager.complete_step(2)
                 display_success_message("Custom dataset successfully loaded.")
 
     if choose_other_checkbox:
         dataset_option = st.selectbox("Select alternative map:", ["WWF Free Flowing Rivers"])
-
         if st.button("Load Alternative Map"):
             with safe_processing("Loading alternative dataset"):
                 if dataset_option == "WWF Free Flowing Rivers":
@@ -254,16 +252,20 @@ def render_step2():
     with safe_processing("Loading waterway data"):
         waterway = load_waterway_data()
 
-        if waterway:
-            # Display map
-            waterway_map = geemap.Map()
-            waterway_map.add_basemap("SATELLITE")
-            waterway_map.centerObject(SessionStateManager.get("Full_positive"))
-            waterway_map.addLayer(waterway, {"color": "blue"}, "Selected Waterway")
-            waterway_map.addLayer(SessionStateManager.get("Full_positive"), {"color": "red"}, "Dams")
-            waterway_map.to_streamlit(width=AppConstants.LARGE_MAP_WIDTH, height=AppConstants.LARGE_MAP_HEIGHT)
+    if waterway:
+        # Display map
+        waterway_map = geemap.Map()
+        waterway_map.add_basemap("SATELLITE")
+        waterway_map.centerObject(SessionStateManager.get("Full_positive"))
+        waterway_map.addLayer(waterway, {"color": "blue"}, "Selected Waterway")
+        waterway_map.addLayer(SessionStateManager.get("Full_positive"), {"color": "red"}, "Dams")
+        waterway_map.to_streamlit(width=AppConstants.LARGE_MAP_WIDTH, height=AppConstants.LARGE_MAP_HEIGHT)
+        st.subheader("Use the automatically loaded NHD default waterway map?")
+        use_default_checkbox = st.checkbox("Yes. Use the automatically loaded NHD default waterway map.")
+        if use_default_checkbox:
+            SessionStateManager.complete_step(2)
 
-            render_alternative_waterway_options()
+    render_alternative_waterway_options()
 
 
 @handle_processing_errors("dam location validation")
@@ -363,8 +365,8 @@ def render_step3():
     """Step 3: Validate Dam Locations"""
     st.header("Step 3: Validate Dam Locations")
 
-    # Check prerequisites
-    if not check_prerequisites([2]):
+    # Check prerequisites; allow user to proceed so long as the NHD dataset is loaded
+    if not check_prerequisites([2]) and not SessionStateManager.get("dataset_loaded"):
         show_prerequisite_error("Step 3", [2])
         return
 
@@ -404,6 +406,11 @@ def render_step3():
 
     # Show options after validation is complete
     if SessionStateManager.get("validation_step") == "show_options":
+        # If step 2 not completed, but NHD dataset is loaded, mark step 2 as completed.
+        # This is possible in the case when the NHD dataset is loaded, the user does not choose an alternative, and
+        #   proceeds without explicitly checking the "Yes. Use the automatically loaded NHD default..." checkbox.
+        if not check_prerequisites([2]) and SessionStateManager.get("dataset_loaded"):
+            SessionStateManager.complete_step(2)
         validation_results = SessionStateManager.get("validation_results")
         if validation_results:
             handle_validation_results(validation_results)
