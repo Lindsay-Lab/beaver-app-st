@@ -949,36 +949,36 @@ def analyze_upstream_downstream(elevation_dist):
 
 def create_export_dataframe(df, include_coordinates=True):
     """Create export DataFrame with coordinates"""
+
+    if not include_coordinates:
+        return df
+
     export_df = df.copy()
 
-    if include_coordinates and SessionStateManager.has("Dam_data"):
+    export_df["longitude"] = 0
+    export_df["latitude"] = 0
+
+    if SessionStateManager.has("Dam_data"):
         coords_df = extract_coordinates_df(SessionStateManager.get("Dam_data"))
 
-        if not coords_df.empty and "id_property" in export_df.columns:
-            # For upstream/downstream data, we need to handle multiple rows per point
-            if len(export_df) > len(coords_df):
-                months_per_point = len(export_df) // len(coords_df)
-                longitudes, latitudes = [], []
-
-                for i in range(len(coords_df)):
-                    coords = coords_df.iloc[i]
-                    for _ in range(months_per_point):
-                        longitudes.append(coords["longitude"])
-                        latitudes.append(coords["latitude"])
-
-                export_df["longitude"] = longitudes
-                export_df["latitude"] = latitudes
-            else:
-                # Regular merge for combined analysis
+        if not coords_df.empty:
+            # determine why id_property is being lost in df conversion from `results_fcc_lst_batch` to `df_batch`
+            if "id_property" in export_df.columns:
                 export_df = export_df.merge(coords_df, on="id_property", how="left")
                 export_df["longitude"] = export_df["longitude"].fillna(0)
                 export_df["latitude"] = export_df["latitude"].fillna(0)
-        else:
-            export_df["longitude"] = 0
-            export_df["latitude"] = 0
-    else:
-        export_df["longitude"] = 0
-        export_df["latitude"] = 0
+            else:
+                if len(export_df) > len(coords_df):
+                    months_per_point = len(export_df) // len(coords_df)
+                    longitudes, latitudes = [], []
+
+                    for i in range(len(coords_df)):
+                        coords = coords_df.iloc[i]
+                        longitudes.extend([coords["longitude"]]*months_per_point)
+                        latitudes.extend([coords["latitude"]]*months_per_point)
+
+                    export_df["longitude"] = longitudes
+                    export_df["latitude"] = latitudes
 
     return export_df
 
