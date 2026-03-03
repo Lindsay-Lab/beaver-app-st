@@ -9,6 +9,7 @@ This module provides functions for extracting and processing Sentinel-2 imagery 
 import ee
 
 from .earth_engine_auth import initialize_earth_engine
+from service.constants import AppConstants
 
 initialize_earth_engine()
 
@@ -82,7 +83,7 @@ def get_monthly_median(collection):
     return monthly_images_collection
 
 
-def add_elevation_band(image):
+def add_elevation_band(image, elev_dist):
 
     dataset = ee.ImageCollection("USGS/3DEP/10m_collection")
 
@@ -103,8 +104,8 @@ def add_elevation_band(image):
     elevation_clipped = elevation.clip(buffered_area)
 
     # Create elevation radius around point to sample from
-    point_plus = point_elevation.add(3)
-    point_minus = point_elevation.subtract(5)
+    point_plus = point_elevation.add(elev_dist)
+    point_minus = point_elevation.subtract(AppConstants.ELEVATION_DISTANCE_SUB)
     elevation_masked = (
         elevation_clipped.where(elevation_clipped.lt(point_minus), 0)
         .where(elevation_clipped.gt(point_minus), 1)
@@ -121,7 +122,7 @@ def add_elevation_band(image):
     return full_image2
 
 
-def add_upstream_downstream_elevation_band(image, box, filtered_waterway):
+def add_upstream_downstream_elevation_band(image, box, filtered_waterway, elev_dist):
     image_month = image.get("Image_month")
     image_year = image.get("Image_year")
     dam_id = image.get("damId")
@@ -144,8 +145,8 @@ def add_upstream_downstream_elevation_band(image, box, filtered_waterway):
     point_elevation = ee.Number(elevation.sample(point_geom, 10).first().get("elevation"))
 
     # Clip and mask based on some +/- thresholds
-    point_plus = point_elevation.add(3)
-    point_minus = point_elevation.subtract(10)
+    point_plus = point_elevation.add(elev_dist)
+    point_minus = point_elevation.subtract(AppConstants.ELEVATION_DISTANCE_SUB)
     elevation_clipped = elevation.clip(buffered_geometry)
     # 1 = within range, 0 = outside range
     elevation_masked = (
@@ -426,7 +427,7 @@ def add_upstream_downstream_elevation_band(image, box, filtered_waterway):
     return full_image.addBands(downstream_rename).addBands(upstream_rename).addBands(elevation_masked2)
 
 
-def s2_export_for_visual(dam_collection, elevation_function, filtered_waterway=None) -> ee.ImageCollection:
+def s2_export_for_visual(dam_collection, elevation_function, elevation_dist=None, filtered_waterway=None) -> ee.ImageCollection:
     """Apply the required transformations and filtration to the images"""
 
     def extract_pixels(box):
@@ -459,10 +460,12 @@ def s2_export_for_visual(dam_collection, elevation_function, filtered_waterway=N
         # Apply elevation_function
         if elevation_function == add_upstream_downstream_elevation_band:
             filtered_collection_bands = filtered_collection_bands.map(
-                lambda img: elevation_function(img, box, filtered_waterway)
+                lambda img: elevation_function(img, box, filtered_waterway, elevation_dist)
             )
         else:
-            filtered_collection_bands = filtered_collection_bands.map(elevation_function)
+            filtered_collection_bands = filtered_collection_bands.map(
+                lambda img: elevation_function(img, elevation_dist)
+            )
 
         return filtered_collection_bands
 

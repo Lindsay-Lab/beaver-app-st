@@ -68,6 +68,47 @@ def upload_points_to_ee(file: StringIO, widget_prefix="") -> ee.FeatureCollectio
         return None
 
 
+def upload_waterway_to_ee(file, widget_prefix="Waterway"):
+    """
+    Upload a user-provided waterway dataset (GeoJSON) and convert to an
+    Earth Engine FeatureCollection.
+    Expected geometry types: LineString / MultiLineString (polygons also allowed).
+    """
+    if not file:
+        return None
+    try:
+        if file.name.lower().endswith((".geojson", ".json")):
+            geojson = load_and_validate_geojson(file)
+            if geojson is None:
+                return None
+            geom_types = {
+                f.get("geometry", {}).get("type")
+                for f in geojson.get("features", [])
+                if f.get("geometry") is not None
+            }
+            if geom_types and not geom_types.intersection(
+                {"LineString", "MultiLineString", "Polygon", "MultiPolygon"}
+            ):
+                st.warning(
+                    f"Uploaded GeoJSON has geometry types {geom_types}, "
+                    "which may not be ideal as a waterway map."
+                )
+            if st.button(
+                "Confirm and Process Waterway",
+                key=f"{widget_prefix}_process_waterway_button",
+            ):
+                features = create_ee_features_from_geojson(geojson)
+                feature_collection = ee.FeatureCollection(features)
+                st.success("Custom waterway dataset successfully uploaded and converted.")
+                return feature_collection
+        else:
+            st.error("Unsupported file format. Please upload a GeoJSON file for waterways.")
+            return None
+    except Exception as e:  # pylint: disable=broad-except
+        st.error(f"An error occurred while processing the waterway file: {e}")
+        return None
+
+
 def upload_non_dam_points_to_ee(file: StringIO, dam_date=None, widget_prefix=""):
     """
     Handles CSV and GeoJSON uploads for non-dam points, using the date from dam data.

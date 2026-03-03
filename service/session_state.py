@@ -192,7 +192,7 @@ class SessionStateManager:
     @staticmethod
     def get_waterway_data() -> Optional[ee.FeatureCollection]:
         """Get waterway data from session state"""
-        return SessionStateManager.get("Waterway")
+        return SessionStateManager.get("selected_waterway")
 
     @staticmethod
     def get_merged_collection() -> Optional[ee.FeatureCollection]:

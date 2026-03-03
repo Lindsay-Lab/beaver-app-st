@@ -12,6 +12,11 @@ class AppConstants:
     MIN_BUFFER_RADIUS = 1
     BUFFER_STEP = 1
 
+    # Elevation band settings
+    DEFAULT_ELEVATION_DISTANCE = 3
+    ELEVATION_STEP = 1
+    ELEVATION_DISTANCE_SUB = 10
+
     # Validation settings
     DEFAULT_MAX_DISTANCE = 50
     MIN_MAX_DISTANCE = 0

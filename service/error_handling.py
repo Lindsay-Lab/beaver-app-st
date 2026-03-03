@@ -8,6 +8,21 @@ from typing import Callable, Any, Optional
 import streamlit as st
 
 
+def _display_technical_details(error_trace: str, force_no_expander: bool = False):
+    """Helper to display technical details with or without expander"""
+    # Check if we're already in an expander context
+    in_expander = st.session_state.get('_error_handler_in_expander', False)
+
+    if in_expander or force_no_expander:
+        # Don't nest expanders - just show the code block
+        st.text("Technical Details:")
+        st.code(error_trace)
+    else:
+        # Safe to use expander
+        with st.expander("Technical Details", expanded=False):
+            st.code(error_trace)
+
+
 def handle_processing_errors(operation_name: str, show_details: bool = True):
     """Decorator for consistent error handling with user-friendly messages"""
 
@@ -19,8 +34,7 @@ def handle_processing_errors(operation_name: str, show_details: bool = True):
             except Exception as e:
                 st.error(f"Error during {operation_name}: {str(e)}")
                 if show_details:
-                    with st.expander("Technical Details", expanded=False):
-                        st.code(traceback.format_exc())
+                    _display_technical_details(traceback.format_exc())
                 return None
 
         return wrapper
@@ -31,6 +45,9 @@ def handle_processing_errors(operation_name: str, show_details: bool = True):
 @contextmanager
 def safe_processing(operation_name: str, show_spinner: bool = True):
     """Context manager for operations with loading states and error handling"""
+    # Mark that we're entering a potential expander context
+    was_in_expander = st.session_state.get('_error_handler_in_expander', False)
+
     try:
         if show_spinner:
             with st.spinner(f"{operation_name}..."):
@@ -39,9 +56,25 @@ def safe_processing(operation_name: str, show_spinner: bool = True):
             yield
     except Exception as e:
         st.error(f"Error during {operation_name}: {str(e)}")
-        with st.expander("Technical Details", expanded=False):
-            st.code(traceback.format_exc())
+        _display_technical_details(traceback.format_exc())
         raise
+    finally:
+        # Restore previous state
+        st.session_state['_error_handler_in_expander'] = was_in_expander
+
+
+@contextmanager
+def safe_expander(label: str, expanded: bool = False):
+    """Context manager for expanders that tracks nesting state"""
+    # Set flag before entering expander
+    st.session_state['_error_handler_in_expander'] = True
+
+    try:
+        with st.expander(label, expanded=expanded):
+            yield
+    finally:
+        # Reset flag after exiting expander
+        st.session_state['_error_handler_in_expander'] = False
 
 
 def display_validation_error(message: str, suggestions: Optional[list] = None):
@@ -106,5 +139,4 @@ def handle_file_processing_error(filename: str, error: Exception):
         )
     else:
         st.error(f"Error processing file '{filename}': {str(error)}")
-        with st.expander("Technical Details", expanded=False):
-            st.code(traceback.format_exc())
+        _display_technical_details(traceback.format_exc())

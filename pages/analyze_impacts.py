@@ -17,11 +17,12 @@ from service.error_handling import (
     display_validation_error,
     display_success_message,
     display_warning_with_options,
-    handle_file_processing_error,
+    handle_file_processing_error, safe_expander,
 )
 from service.load_datasets import load_nhd_collections
 from service.negative_sampling import prepare_hydro, sample_negative_points
-from service.parser import extract_coordinates_df, upload_non_dam_points_to_ee, upload_points_to_ee
+from service.parser import extract_coordinates_df, upload_non_dam_points_to_ee, upload_points_to_ee, \
+    upload_waterway_to_ee
 from service.session_state import SessionStateManager, check_prerequisites, show_prerequisite_error
 from service.validation import (
     check_waterway_intersection,
@@ -60,34 +61,34 @@ def main():
     )
 
     # Render each step in expandable sections
-    with st.expander("Step 1: Upload Dam Locations", expanded=not SessionStateManager.is_step_complete(1)):
+    with safe_expander("Step 1: Upload Dam Locations", expanded=not SessionStateManager.is_step_complete(1)):
         render_step1()
 
-    with st.expander(
+    with safe_expander(
         "Step 2: Select Waterway",
         expanded=SessionStateManager.is_step_complete(1) and not SessionStateManager.is_step_complete(2),
     ):
         render_step2()
 
-    with st.expander(
+    with safe_expander(
         "Step 3: Validate Dam Locations",
         expanded=SessionStateManager.is_step_complete(2) and not SessionStateManager.is_step_complete(3),
     ):
         render_step3()
 
-    with st.expander(
+    with safe_expander(
         "Step 4: Upload or Generate Non-Dam Locations",
         expanded=SessionStateManager.is_step_complete(3) and not SessionStateManager.is_step_complete(4),
     ):
         render_step4()
 
-    with st.expander(
+    with safe_expander(
         "Step 5: Create Buffers",
         expanded=SessionStateManager.is_step_complete(4) and not SessionStateManager.is_step_complete(5),
     ):
         render_step5()
 
-    with st.expander("Step 6: Visualize Trends", expanded=SessionStateManager.is_step_complete(5)):
+    with safe_expander("Step 6: Visualize Trends", expanded=SessionStateManager.is_step_complete(5)):
         render_step6()
 
     # Footer
@@ -183,9 +184,12 @@ def load_waterway_data():
     if nhd_collections:
         merged_nhd = ee.FeatureCollection(nhd_collections).flatten()
         SessionStateManager.set_multiple(
-            {"selected_waterway": merged_nhd, "Waterway": merged_nhd, "dataset_loaded": True}
+            {"selected_waterway": merged_nhd, "dataset_loaded": True}
         )
-        SessionStateManager.complete_step(2)
+        st.success(
+            "Automatically loaded NHD dataset. If you want to use a different dataset, "
+            "you can upload your own or use the alternative dataset."
+        )
         return merged_nhd
 
     display_validation_error(
@@ -199,21 +203,32 @@ def render_alternative_waterway_options():
     """Render alternative waterway dataset options"""
     st.subheader("To use a different waterway map instead:")
 
-    upload_own_checkbox = st.checkbox("Use Custom Waterway Map")
+    upload_own_checkbox = st.checkbox("Upload Custom Waterway File in Geojson Format")
+    preuploaded_checkbox = st.checkbox("Use Custom Waterway Map Uploaded to GEE")
     choose_other_checkbox = st.checkbox("Use Alternative Waterway Map")
 
     if upload_own_checkbox:
+        uploaded_file = st.file_uploader("Choose a GeoJSON file", type=["geojson", "json"],
+                                         key="waterway_file_uploader")
+        # asset_id = st.text_input("Upload a waterway file in geojson format:")
+        if st.button("Upload Custom Dataset"):
+            with safe_processing("Loading custom dataset"):
+                waterway_own = upload_waterway_to_ee(uploaded_file)
+                SessionStateManager.set_multiple({"selected_waterway": waterway_own})
+                SessionStateManager.complete_step(2)
+                display_success_message("Dataset successfully uploaded.")
+
+    if preuploaded_checkbox:
         asset_id = st.text_input("Enter GEE Asset Table ID (e.g., projects/ee-beaver-lab/assets/Hydro/MA_Hydro_arc):")
         if st.button("Load Custom Dataset"):
             with safe_processing("Loading custom dataset"):
                 waterway_own = ee.FeatureCollection(asset_id)
-                SessionStateManager.set_multiple({"selected_waterway": waterway_own, "dataset_loaded": True})
+                SessionStateManager.set_multiple({"selected_waterway": waterway_own})
                 SessionStateManager.complete_step(2)
                 display_success_message("Custom dataset successfully loaded.")
 
     if choose_other_checkbox:
         dataset_option = st.selectbox("Select alternative map:", ["WWF Free Flowing Rivers"])
-
         if st.button("Load Alternative Map"):
             with safe_processing("Loading alternative dataset"):
                 if dataset_option == "WWF Free Flowing Rivers":
@@ -234,32 +249,30 @@ def render_step2():
         show_prerequisite_error("Step 2", [1])
         return
 
-    # Show loading message
-    st.success(
-        "Automatically loaded NHD dataset. If you want to use a different dataset, "
-        "you can upload your own or use the alternative dataset."
-    )
-
     with safe_processing("Loading waterway data"):
         waterway = load_waterway_data()
 
-        if waterway:
-            # Display map
-            waterway_map = geemap.Map()
-            waterway_map.add_basemap("SATELLITE")
-            waterway_map.centerObject(SessionStateManager.get("Full_positive"))
-            waterway_map.addLayer(waterway, {"color": "blue"}, "Selected Waterway")
-            waterway_map.addLayer(SessionStateManager.get("Full_positive"), {"color": "red"}, "Dams")
-            waterway_map.to_streamlit(width=AppConstants.LARGE_MAP_WIDTH, height=AppConstants.LARGE_MAP_HEIGHT)
+    if waterway:
+        # Display map
+        waterway_map = geemap.Map()
+        waterway_map.add_basemap("SATELLITE")
+        waterway_map.centerObject(SessionStateManager.get("Full_positive"))
+        waterway_map.addLayer(waterway, {"color": "blue"}, "Selected Waterway")
+        waterway_map.addLayer(SessionStateManager.get("Full_positive"), {"color": "red"}, "Dams")
+        waterway_map.to_streamlit(width=AppConstants.LARGE_MAP_WIDTH, height=AppConstants.LARGE_MAP_HEIGHT)
+        st.subheader("Use the automatically loaded NHD default waterway map?")
+        use_default_checkbox = st.checkbox("Yes. Use the automatically loaded NHD default waterway map.")
+        if use_default_checkbox:
+            SessionStateManager.complete_step(2)
 
-            render_alternative_waterway_options()
+    render_alternative_waterway_options()
 
 
 @handle_processing_errors("dam location validation")
 def perform_dam_validation(max_distance):
     """Perform dam location validation"""
     error_msg = SessionStateManager.validate_earth_engine_data(
-        {"Full_positive": "Dam locations", "Waterway": "Waterway data"}
+        {"Full_positive": "Dam locations", "selected_waterway": "Waterway data"}
     )
 
     if error_msg:
@@ -267,7 +280,7 @@ def perform_dam_validation(max_distance):
         return None
 
     full_positive = SessionStateManager.get("Full_positive")
-    waterway = SessionStateManager.get("Waterway")
+    waterway = SessionStateManager.get_waterway_data()
 
     # Perform distance validation
     distance_validation = validate_dam_waterway_distance(full_positive, waterway, max_distance)
@@ -352,8 +365,8 @@ def render_step3():
     """Step 3: Validate Dam Locations"""
     st.header("Step 3: Validate Dam Locations")
 
-    # Check prerequisites
-    if not check_prerequisites([2]):
+    # Check prerequisites; allow user to proceed so long as the NHD dataset is loaded
+    if not check_prerequisites([2]) and not SessionStateManager.get("dataset_loaded"):
         show_prerequisite_error("Step 3", [2])
         return
 
@@ -383,9 +396,9 @@ def render_step3():
                     # Display validation map
                     st.subheader("Validation Map")
                     validation_map = visualize_validation_results(
-                        SessionStateManager.get("Full_positive"),
-                        SessionStateManager.get("Waterway"),
-                        validation_results,
+                        dam_collection=SessionStateManager.get("Full_positive"),
+                        waterway_fc=SessionStateManager.get_waterway_data(),
+                        validation_results=validation_results,
                     )
                     validation_map.to_streamlit(
                         width=AppConstants.LARGE_MAP_WIDTH, height=AppConstants.LARGE_MAP_HEIGHT
@@ -393,6 +406,11 @@ def render_step3():
 
     # Show options after validation is complete
     if SessionStateManager.get("validation_step") == "show_options":
+        # If step 2 not completed, but NHD dataset is loaded, mark step 2 as completed.
+        # This is possible in the case when the NHD dataset is loaded, the user does not choose an alternative, and
+        #   proceeds without explicitly checking the "Yes. Use the automatically loaded NHD default..." checkbox.
+        if not check_prerequisites([2]) and SessionStateManager.get("dataset_loaded"):
+            SessionStateManager.complete_step(2)
         validation_results = SessionStateManager.get("validation_results")
         if validation_results:
             handle_validation_results(validation_results)
@@ -743,9 +761,9 @@ def render_step5():
 
 
 @handle_processing_errors("combined effects analysis")
-def analyze_combined_effects():
+def analyze_combined_effects(elevation_dist):
     """Analyze combined effects of dams"""
-    dam_data = SessionStateManager.get("Dam_data")
+    dam_data = SessionStateManager.get_dam_data()
     if not dam_data:
         display_validation_error("Dam data not found. Please complete previous steps.")
         return None
@@ -784,7 +802,8 @@ def analyze_combined_effects():
             dam_batch_fc = ee.FeatureCollection(dam_batch)
 
             # Process batch through pipeline
-            s2_cloud_mask_batch = ee.ImageCollection(s2_export_for_visual(dam_batch_fc, add_elevation_band))
+            s2_cloud_mask_batch = ee.ImageCollection(s2_export_for_visual(dam_batch_fc, add_elevation_band,
+                                                                          elevation_dist))
             s2_image_collection_batch = ee.ImageCollection(s2_cloud_mask_batch)
             s2_with_lst_batch = s2_image_collection_batch.map(add_landsat_lst_et)
             results_fc_lst_batch = s2_with_lst_batch.map(compute_all_metrics_lst_et)
@@ -812,21 +831,25 @@ def analyze_combined_effects():
     # Create visualization
     fig, axes = plt.subplots(4, 1, figsize=(12, 18))
     metrics = ["NDVI", "NDWI_Green", "LST", "ET"]
-    titles = ["NDVI", "NDWI Green", "LST (°C)", "ET"]
+    titles = ["NDVI", "NDWI Green", "LST (°C)", "ET (mm)"]
 
     for ax, metric, title in zip(axes, metrics, titles):
-        sns.lineplot(
-            data=df_lst,
-            x="Image_month",
-            y=metric,
-            hue="Dam_status",
-            style="Dam_status",
-            markers=True,
-            dashes=False,
-            ax=ax,
-        )
-        ax.set_title(f"{title} by Month", fontsize=14)
-        ax.set_xticks(range(1, 13))
+        try:
+            sns.lineplot(
+                data=df_lst,
+                x="Image_month",
+                y=metric,
+                hue="Dam_status",
+                style="Dam_status",
+                markers=True,
+                dashes=False,
+                ax=ax,
+            )
+            ax.set_title(f"{title} by Month", fontsize=14)
+            ax.set_xticks(range(1, 13))
+        except ValueError:
+            fig.delaxes(ax)
+            st.warning(f"Unable to create map for {title}.")
 
     plt.tight_layout()
 
@@ -836,16 +859,16 @@ def analyze_combined_effects():
 
 
 @handle_processing_errors("upstream downstream analysis")
-def analyze_upstream_downstream():
+def analyze_upstream_downstream(elevation_dist):
     """Analyze upstream and downstream effects"""
-    error_msg = SessionStateManager.validate_required_data({"Dam_data": "Dam locations", "Waterway": "Waterway data"})
+    error_msg = SessionStateManager.validate_required_data({"Dam_data": "Dam locations", "selected_waterway": "Waterway data"})
 
     if error_msg:
         display_validation_error(error_msg)
         return None
 
-    dam_data = SessionStateManager.get("Dam_data")
-    waterway_fc = SessionStateManager.get("Waterway")
+    dam_data = SessionStateManager.get_dam_data()
+    waterway_fc = SessionStateManager.get_waterway_data()
 
     # Process in batches
     total_count = dam_data.size().getInfo()
@@ -865,7 +888,8 @@ def analyze_upstream_downstream():
             dam_batch_fc = ee.FeatureCollection(dam_batch)
 
             # Process through pipeline
-            s2_ic_batch = s2_export_for_visual(dam_batch_fc, add_upstream_downstream_elevation_band, waterway_fc)
+            s2_ic_batch = s2_export_for_visual(dam_batch_fc, add_upstream_downstream_elevation_band, elevation_dist,
+                                               waterway_fc)
 
             s2_with_lst_et = s2_ic_batch.map(add_landsat_lst_et)
             results_batch = s2_with_lst_et.map(compute_all_metrics_up_downstream)
@@ -910,7 +934,11 @@ def analyze_upstream_downstream():
         ax.set_xticks(range(1, 13))
 
     for ax, met in zip(axes2, ["NDVI", "NDWI", "LST", "ET"]):
-        melt_and_plot(final_df, met, ax)
+        try:
+            melt_and_plot(final_df, met, ax)
+        except KeyError:
+            fig2.delaxes(ax)
+            st.warning(f"Unable to create map for {met}.")
 
     plt.tight_layout()
 
@@ -921,36 +949,36 @@ def analyze_upstream_downstream():
 
 def create_export_dataframe(df, include_coordinates=True):
     """Create export DataFrame with coordinates"""
+
+    if not include_coordinates:
+        return df
+
     export_df = df.copy()
 
-    if include_coordinates and SessionStateManager.has("Dam_data"):
+    export_df["longitude"] = 0
+    export_df["latitude"] = 0
+
+    if SessionStateManager.has("Dam_data"):
         coords_df = extract_coordinates_df(SessionStateManager.get("Dam_data"))
 
-        if not coords_df.empty and "id_property" in export_df.columns:
-            # For upstream/downstream data, we need to handle multiple rows per point
-            if len(export_df) > len(coords_df):
-                months_per_point = len(export_df) // len(coords_df)
-                longitudes, latitudes = [], []
-
-                for i in range(len(coords_df)):
-                    coords = coords_df.iloc[i]
-                    for _ in range(months_per_point):
-                        longitudes.append(coords["longitude"])
-                        latitudes.append(coords["latitude"])
-
-                export_df["longitude"] = longitudes
-                export_df["latitude"] = latitudes
-            else:
-                # Regular merge for combined analysis
+        if not coords_df.empty:
+            # determine why id_property is being lost in df conversion from `results_fcc_lst_batch` to `df_batch`
+            if "id_property" in export_df.columns:
                 export_df = export_df.merge(coords_df, on="id_property", how="left")
                 export_df["longitude"] = export_df["longitude"].fillna(0)
                 export_df["latitude"] = export_df["latitude"].fillna(0)
-        else:
-            export_df["longitude"] = 0
-            export_df["latitude"] = 0
-    else:
-        export_df["longitude"] = 0
-        export_df["latitude"] = 0
+            else:
+                if len(export_df) > len(coords_df):
+                    months_per_point = len(export_df) // len(coords_df)
+                    longitudes, latitudes = [], []
+
+                    for i in range(len(coords_df)):
+                        coords = coords_df.iloc[i]
+                        longitudes.extend([coords["longitude"]]*months_per_point)
+                        latitudes.extend([coords["latitude"]]*months_per_point)
+
+                    export_df["longitude"] = longitudes
+                    export_df["latitude"] = latitudes
 
     return export_df
 
@@ -958,6 +986,14 @@ def create_export_dataframe(df, include_coordinates=True):
 def render_step6():
     """Step 6: Visualize Trends"""
     st.header("Step 6: Visualize Trends")
+
+    elevation_dist = st.number_input(
+        "Elevation distance (meters)",
+        value=AppConstants.DEFAULT_ELEVATION_DISTANCE,
+        min_value=1,
+        step=AppConstants.ELEVATION_STEP,
+        key="elevation_distance_input",
+    )
 
     # Check prerequisites
     if not check_prerequisites([5]):
@@ -970,7 +1006,7 @@ def render_step6():
         if not SessionStateManager.get("visualization_complete", False):
             if st.button("Analyze Combined Effects"):
                 with safe_processing("Analyzing combined effects"):
-                    result = analyze_combined_effects()
+                    result = analyze_combined_effects(elevation_dist)
                     if result:
                         display_success_message("Visualization complete!")
 
@@ -999,7 +1035,7 @@ def render_step6():
         if not SessionStateManager.get("upstream_analysis_complete", False):
             if st.button("Analyze Upstream & Downstream Effects"):
                 with safe_processing("Analyzing Upstream & Downstream"):
-                    result = analyze_upstream_downstream()
+                    result = analyze_upstream_downstream(elevation_dist)
                     if result:
                         display_success_message("Upstream & downstream analysis completed successfully!")
 
