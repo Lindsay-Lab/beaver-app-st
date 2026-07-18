@@ -1,5 +1,8 @@
 tests/assets/
 config.yaml
+# Streamlit secrets — never commit (may contain the GCP service-account key)
+.streamlit/secrets.toml
+secrets.toml
 venv/
 smenv/
 .DS_Store
