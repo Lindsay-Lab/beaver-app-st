@@ -91,6 +91,12 @@ def process_dam_upload(uploaded_file):
     """Process uploaded dam location file"""
     feature_collection = upload_points_to_ee(uploaded_file, widget_prefix="Dam")
     if feature_collection:
+        if feature_collection.size().getInfo() < 2:
+            st.warning(
+                "Please upload more than one dam location — the comparative analysis "
+                "needs at least two."
+            )
+            return None
         SessionStateManager.set_multiple(
             {
                 "Positive_collection": feature_collection,
