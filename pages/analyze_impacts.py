@@ -707,9 +707,17 @@ def render_step5():
 
     # Display buffer settings
     st.subheader("Buffer Settings")
+    elevation_dist = st.number_input(
+        "Elevation distance (meters)",
+        value=AppConstants.DEFAULT_ELEVATION_DISTANCE,
+        min_value=1,
+        step=AppConstants.ELEVATION_STEP,
+        key="elevation_distance_input",
+    )
     buffer_radius = st.number_input(
         "Enter buffer radius (meters). We will analyze locations within this buffer "
-        "that are no more than 3m in elevation away from the dam location.",
+        f"that are no more than the selected elevation distance ({elevation_dist}m) "
+        "away from the dam location.",
         min_value=AppConstants.MIN_BUFFER_RADIUS,
         step=AppConstants.BUFFER_STEP,
         value=SessionStateManager.get("buffer_radius"),
@@ -965,12 +973,8 @@ def render_step6():
     """Step 6: Visualize Trends"""
     st.header("Step 6: Visualize Trends")
 
-    elevation_dist = st.number_input(
-        "Elevation distance (meters)",
-        value=AppConstants.DEFAULT_ELEVATION_DISTANCE,
-        min_value=1,
-        step=AppConstants.ELEVATION_STEP,
-        key="elevation_distance_input",
+    elevation_dist = SessionStateManager.get(
+        "elevation_distance_input", AppConstants.DEFAULT_ELEVATION_DISTANCE
     )
 
     # Check prerequisites
