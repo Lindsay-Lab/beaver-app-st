@@ -79,7 +79,8 @@ def initialize_earth_engine():
 
     try:
         credentials = get_credentials()
-        ee.Initialize(credentials, project="ee-beaver-lab")
+        project_id = st.secrets["gcp_service_account"]["project_id"]
+        ee.Initialize(credentials, project=project_id)
         st.success("Earth Engine initialized with service account")
     except (KeyError, FileNotFoundError):
         config = load_local_config()

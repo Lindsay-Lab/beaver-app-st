@@ -29,10 +29,10 @@ RUN curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cl
 ENV PATH="/usr/local/gcloud/bin:${PATH}"
 
 # 7️⃣ Set up Google Cloud authentication (Service Account JSON)
-ENV GOOGLE_APPLICATION_CREDENTIALS="/app/project-beaver-415818-a4eb6a21a9a8.json"
+ENV GOOGLE_APPLICATION_CREDENTIALS="/app/service-account.json"
 
 # 8️⃣ Copy the service account JSON into the container
-COPY project-beaver-415818-a4eb6a21a9a8.json /app/
+COPY service-account.json /app/
 
 # 9️⃣ Install Python dependencies
 RUN pip install --upgrade pip

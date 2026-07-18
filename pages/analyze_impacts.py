@@ -197,7 +197,7 @@ def render_alternative_waterway_options():
                 display_success_message("Dataset successfully uploaded.")
 
     if preuploaded_checkbox:
-        asset_id = st.text_input("Enter GEE Asset Table ID (e.g., projects/ee-beaver-lab/assets/Hydro/MA_Hydro_arc):")
+        asset_id = st.text_input("Enter GEE Asset Table ID (e.g., projects/your-project/assets/Hydro/MA_Hydro_arc):")
         if st.button("Load Custom Dataset"):
             with safe_processing("Loading custom dataset"):
                 waterway_own = ee.FeatureCollection(asset_id)

@@ -106,7 +106,7 @@ credentials = service_account.Credentials.from_service_account_info(
     credentials_info,
     scopes=["https://www.googleapis.com/auth/earthengine"]
 )
-ee.Initialize(credentials, project="ee-beaver-lab")
+ee.Initialize(credentials, project=st.secrets["gcp_service_account"]["project_id"])
 ```
 This establishes the connection to Earth Engine using service account credentials.
 
