@@ -48,12 +48,6 @@ SessionStateManager.initialize()
 
 def main():
     """Main application function"""
-    # Show questionnaire if not shown
-    if not SessionStateManager.get("questionnaire_shown", False):
-        show_questionnaire()
-        return
-
-    # Main application
     st.title("Analyzing the Impact of Beaver Dams")
     st.warning(
         "Please note that the Evapotranspiration data is not available for the eastern half of the US "
@@ -90,28 +84,6 @@ def main():
 
     with safe_expander("Step 6: Visualize Trends", expanded=SessionStateManager.is_step_complete(5)):
         render_step6()
-
-    # Footer
-    st.info(
-        "You can make the Beaver Impacts Tool better by filling out our "
-        "[feedback form](https://docs.google.com/forms/d/e/1FAIpQLSeE1GP7OptA4-z8Melz2AHxNsddtL9ZgJVXdVVtxLsrljJ10Q/viewform?usp=sharing)."
-    )
-
-
-def show_questionnaire():
-    """Display initial questionnaire section"""
-    st.title("Beaver Impacts Feedback Survey")
-    st.markdown(
-        """
-    Thank you for being a beta tester for the Beaver Impacts web tool! We really value your input and appreciate you taking the time to fill out this form.
-
-    Please click [here](https://docs.google.com/forms/d/e/1FAIpQLSeE1GP7OptA4-z8Melz2AHxNsddtL9ZgJVXdVVtxLsrljJ10Q/viewform?usp=sharing) to start the survey. Continue on by clicking below:
-    """
-    )
-
-    if st.button("I have opened the survey and will fill it out after trying the web tool.", type="primary"):
-        SessionStateManager.set("questionnaire_shown", True)
-        st.rerun()
 
 
 @handle_processing_errors("file upload processing")

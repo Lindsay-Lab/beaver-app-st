@@ -7,7 +7,6 @@ application state including user progress, data collections, configuration
 settings, and UI flags.
 
 The session state is organized into several categories:
-- Questionnaire and survey tracking
 - Data collections (dam locations, waterways, analysis results)
 - Workflow progress and step completion
 - Configuration values (buffer sizes, validation parameters)

@@ -45,9 +45,6 @@ class AppConstants:
 
     # Session state defaults
     SESSION_DEFAULTS = {
-        # Questionnaire state
-        "questionnaire_shown": False,
-        "survey_clicked": False,
         # Data collections
         "Positive_collection": None,
         "Dam_data": None,
