@@ -600,8 +600,8 @@ def compute_all_metrics_lst_et(image) -> ee.Feature:
     # Prepare bands for reduction
     bands = {"NDVI": ndvi, "NDWI_Green": ndwi_green, "LST": image.select("LST"), "ET": image.select("ET")}
 
-    # Reduce all bands over geometry
-    reduced_values = _reduce_bands_by_mask(bands, geometry=geometry)
+    # Reduce all bands over geometry, restricted to the elevation band
+    reduced_values = _reduce_bands_by_mask(bands, mask=elevation_mask, geometry=geometry)
 
     # Extract metadata and combine with metrics
     metadata = _extract_metadata(image)
