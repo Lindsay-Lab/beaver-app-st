@@ -114,6 +114,9 @@ completion flag (`step1_complete` … `step6_complete`, managed by `SessionState
    elevation-masked (`create_buffers`, `render_step5`).
 6. **Visualize Trends** — run the pipeline and plot monthly means with 95% confidence
    intervals; download figures and a CSV (`analyze_combined_effects`, `render_step6`).
+   Optionally compare multiple years: the pipeline is re-run per selected year (points
+   re-dated to July 1 of that year) and yearly averages over the selected months are
+   plotted per metric (`analyze_multiple_years`).
 
 ## Data Processing Pipeline
 

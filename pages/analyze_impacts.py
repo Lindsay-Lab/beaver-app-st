@@ -1,6 +1,7 @@
 """Primary page for analyzing dam impacts"""
 
 import io
+import math
 
 import ee
 import geemap.foliumap as geemap
@@ -644,13 +645,8 @@ def render_step4():
                     )
 
 
-@handle_processing_errors("buffer creation")
-def create_buffers(buffer_radius):
-    """Create buffers around merged collection points"""
-    merged_collection = SessionStateManager.get("Merged_collection")
-    if not merged_collection:
-        display_validation_error("No merged data found. Please complete Step 4 first.")
-        return None
+def buffer_merged_points(merged_collection, buffer_radius):
+    """Buffer each point and standardize its date for the analysis pipeline"""
 
     def add_dam_buffer_and_standardize_date(feature):
         dam_status = feature.get("Dam")
@@ -679,7 +675,18 @@ def create_buffers(buffer_radius):
         )
 
     buffered_collection = merged_collection.map(add_dam_buffer_and_standardize_date)
-    dam_data = buffered_collection.select(["id_property", "Dam", "Survey_Date", "Damdate", "Point_geo"])
+    return buffered_collection.select(["id_property", "Dam", "Survey_Date", "Damdate", "Point_geo"])
+
+
+@handle_processing_errors("buffer creation")
+def create_buffers(buffer_radius):
+    """Create buffers around merged collection points"""
+    merged_collection = SessionStateManager.get("Merged_collection")
+    if not merged_collection:
+        display_validation_error("No merged data found. Please complete Step 4 first.")
+        return None
+
+    dam_data = buffer_merged_points(merged_collection, buffer_radius)
 
     SessionStateManager.set_multiple({"Dam_data": dam_data, "buffers_created": True})
 
@@ -744,24 +751,12 @@ def render_step5():
                 display_success_message(f"Buffers created successfully with radius {buffer_radius} meters!")
 
 
-@handle_processing_errors("combined effects analysis")
-def analyze_combined_effects(elevation_dist):
-    """Analyze combined effects of dams"""
-    dam_data = SessionStateManager.get_dam_data()
-    if not dam_data:
-        display_validation_error("Dam data not found. Please complete previous steps.")
-        return None
+def compute_metrics_df(dam_data, elevation_dist):
+    """Run the batched metric pipeline over buffered points and return a DataFrame"""
+    dam_data = dam_data.filter(ee.Filter.notNull(["Survey_Date"]))
+    total_count = dam_data.size().getInfo()
 
-    # Validate dates in data
-    def validate_date(feature):
-        date = feature.get("Survey_Date")
-        if not date:
-            date = feature.get("date")
-        return feature
-
-    dam_data = dam_data.map(validate_date).filter(ee.Filter.notNull(["Survey_Date"]))
-
-    if dam_data.size().getInfo() == 0:
+    if total_count == 0:
         display_validation_error(
             "No valid data with dates found.",
             ["Check your data for valid date fields", "Ensure date format is correct"],
@@ -769,7 +764,6 @@ def analyze_combined_effects(elevation_dist):
         return None
 
     # Process data in batches
-    total_count = dam_data.size().getInfo()
     batch_size = AppConstants.BATCH_SIZE
     num_batches = (total_count + batch_size - 1) // batch_size
     df_list = []
@@ -811,6 +805,29 @@ def analyze_combined_effects(elevation_dist):
     df_lst["Image_month"] = pd.to_numeric(df_lst["Image_month"])
     df_lst["Image_year"] = pd.to_numeric(df_lst["Image_year"])
     df_lst["Dam_status"] = df_lst["Dam_status"].replace({"positive": "Dam", "negative": "Non-dam"})
+    return df_lst
+
+
+@handle_processing_errors("combined effects analysis")
+def analyze_combined_effects(elevation_dist):
+    """Analyze combined effects of dams"""
+    dam_data = SessionStateManager.get_dam_data()
+    if not dam_data:
+        display_validation_error("Dam data not found. Please complete previous steps.")
+        return None
+
+    # Validate dates in data
+    def validate_date(feature):
+        date = feature.get("Survey_Date")
+        if not date:
+            date = feature.get("date")
+        return feature
+
+    dam_data = dam_data.map(validate_date)
+
+    df_lst = compute_metrics_df(dam_data, elevation_dist)
+    if df_lst is None:
+        return None
 
     # Create visualization
     fig, axes = plt.subplots(4, 1, figsize=(12, 18))
@@ -836,6 +853,95 @@ def analyze_combined_effects(elevation_dist):
             st.warning(f"Unable to create map for {title}.")
 
     plt.tight_layout()
+
+    SessionStateManager.set_multiple({"fig": fig, "df_lst": df_lst, "visualization_complete": True})
+
+    return {"figure": fig, "dataframe": df_lst}
+
+
+def _mean_over_months(sub_df, metric, months):
+    """Average a metric over the selected months for one (year, status) subset.
+
+    Cross-point monthly means are computed first, then averaged with equal weight
+    per month; the 95% CI reflects month-to-month spread within the year.
+    """
+    if sub_df.empty or metric not in sub_df.columns:
+        return float("nan"), 0.0
+
+    monthly = sub_df[sub_df["Image_month"].isin(months)].groupby("Image_month")[metric].mean().dropna()
+    if monthly.empty:
+        return float("nan"), 0.0
+
+    n = len(monthly)
+    error = float(1.96 * monthly.std() / math.sqrt(n)) if n > 1 else 0.0
+    return float(monthly.mean()), error
+
+
+def plot_yearly_comparison(df_lst, years, months):
+    """Plot per-year averages of each metric for dam vs non-dam locations"""
+    fig, axes = plt.subplots(4, 1, figsize=(12, 18))
+    metrics = ["NDVI", "NDWI_Green", "LST", "ET"]
+    titles = ["NDVI", "NDWI Green", "LST (°C)", "ET (mm)"]
+    bar_width = 0.35
+
+    for ax, metric, title in zip(axes, metrics, titles):
+        for offset, status in ((-bar_width / 2, "Dam"), (bar_width / 2, "Non-dam")):
+            means, errors = [], []
+            for year in years:
+                sub_df = df_lst[(df_lst["Dam_status"] == status) & (df_lst["analysis_year"] == year)]
+                mean, error = _mean_over_months(sub_df, metric, months)
+                means.append(mean)
+                errors.append(error)
+            ax.bar(
+                [i + offset for i in range(len(years))],
+                means,
+                width=bar_width,
+                yerr=errors,
+                capsize=4,
+                label=status,
+            )
+        ax.set_title(f"{title} by Year", fontsize=14)
+        ax.set_xticks(range(len(years)))
+        ax.set_xticklabels([str(year) for year in years])
+        ax.legend()
+
+    plt.tight_layout()
+    return fig
+
+
+@handle_processing_errors("multi-year analysis")
+def analyze_multiple_years(elevation_dist, years, months):
+    """Run the combined analysis once per year and compare yearly averages"""
+    merged_collection = SessionStateManager.get("Merged_collection")
+    if not merged_collection:
+        display_validation_error("No merged data found. Please complete Step 4 first.")
+        return None
+
+    buffer_radius = SessionStateManager.get("buffer_radius_input", SessionStateManager.get("buffer_radius"))
+
+    year_dfs = []
+    for year in years:
+        st.write(f"Analyzing year {year}")
+
+        # Re-date every point to July 1 of the target year so the pipeline pulls
+        # that year's imagery, then re-buffer and run the metric pipeline.
+        full_date = f"{year}-07-01"
+        dated_collection = merged_collection.map(lambda feature, date=full_date: feature.set("date", date))
+        dam_data = buffer_merged_points(dated_collection, buffer_radius)
+
+        df_year = compute_metrics_df(dam_data, elevation_dist)
+        if df_year is None or df_year.empty:
+            st.warning(f"No data could be processed for {year}.")
+            continue
+        df_year["analysis_year"] = year
+        year_dfs.append(df_year)
+
+    if not year_dfs:
+        display_validation_error("No data could be processed for any selected year.")
+        return None
+
+    df_lst = pd.concat(year_dfs, ignore_index=True)
+    fig = plot_yearly_comparison(df_lst, years, months)
 
     SessionStateManager.set_multiple({"fig": fig, "df_lst": df_lst, "visualization_complete": True})
 
@@ -891,7 +997,37 @@ def render_step6():
         show_prerequisite_error("Step 6", [5])
         return
 
-    if not SessionStateManager.get("visualization_complete", False):
+    multi_year = st.checkbox(
+        "Compare multiple years",
+        key="multi_year_checkbox",
+        help="Re-run the analysis for each selected year (using imagery within ±6 months "
+        "of July 1) and compare yearly averages for dam vs non-dam locations.",
+    )
+
+    if multi_year:
+        years = st.multiselect("Years to analyze:", list(range(2017, 2025)), key="multi_year_years")
+        months = st.multiselect(
+            "Months to include in each yearly average:",
+            list(range(1, 13)),
+            default=list(range(1, 13)),
+            key="multi_year_months",
+        )
+
+        if any(year < 2020 for year in years):
+            st.warning("You may proceed, but ET data may not be available for some selected years.")
+
+        if st.button("Analyze Across Years"):
+            if len(years) < 2:
+                st.warning("Please select at least two years to compare.")
+            elif not months:
+                st.warning("Please select at least one month.")
+            else:
+                with safe_processing("Analyzing across years"):
+                    result = analyze_multiple_years(elevation_dist, sorted(years), sorted(months))
+                    if result:
+                        display_success_message("Multi-year analysis complete!")
+
+    elif not SessionStateManager.get("visualization_complete", False):
         if st.button("Analyze Combined Effects"):
             with safe_processing("Analyzing combined effects"):
                 result = analyze_combined_effects(elevation_dist)
