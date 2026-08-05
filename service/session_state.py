@@ -71,7 +71,6 @@ class SessionStateManager:
             "buffers_created",
             "visualization_complete",
             "show_non_dam_section",
-            "upstream_analysis_complete",
         ]
         for key in workflow_keys:
             st.session_state[key] = False
@@ -142,7 +141,6 @@ class SessionStateManager:
             "validation_complete",
             "validation_step",
             "visualization_complete",
-            "upstream_analysis_complete",
             "buffer_complete",
             "show_non_dam_section",
         ]

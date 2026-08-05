@@ -113,8 +113,7 @@ completion flag (`step1_complete` … `step6_complete`, managed by `SessionState
    the elevation distance (`DEFAULT_ELEVATION_DISTANCE` = 3m); buffers are built and
    elevation-masked (`create_buffers`, `render_step5`).
 6. **Visualize Trends** — run the pipeline and plot monthly means with 95% confidence
-   intervals; download figures and a CSV (`analyze_combined_effects`, `render_step6`). An
-   optional upstream/downstream breakdown is also available (`analyze_upstream_downstream`).
+   intervals; download figures and a CSV (`analyze_combined_effects`, `render_step6`).
 
 ## Data Processing Pipeline
 

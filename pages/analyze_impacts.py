@@ -35,8 +35,6 @@ from service.visualize_trends import (
     s2_export_for_visual,
     add_landsat_lst_et,
     compute_all_metrics_lst_et,
-    compute_all_metrics_up_downstream,
-    add_upstream_downstream_elevation_band,
     add_elevation_band,
 )
 
@@ -844,95 +842,6 @@ def analyze_combined_effects(elevation_dist):
     return {"figure": fig, "dataframe": df_lst}
 
 
-@handle_processing_errors("upstream downstream analysis")
-def analyze_upstream_downstream(elevation_dist):
-    """Analyze upstream and downstream effects"""
-    error_msg = SessionStateManager.validate_required_data({"Dam_data": "Dam locations", "selected_waterway": "Waterway data"})
-
-    if error_msg:
-        display_validation_error(error_msg)
-        return None
-
-    dam_data = SessionStateManager.get_dam_data()
-    waterway_fc = SessionStateManager.get_waterway_data()
-
-    # Process in batches
-    total_count = dam_data.size().getInfo()
-    batch_size = AppConstants.BATCH_SIZE
-    num_batches = (total_count + batch_size - 1) // batch_size
-    df_list = []
-
-    progress_bar = st.progress(0)
-    st.write(f"Processing {total_count} dam points in {num_batches} batches")
-
-    for i in range(num_batches):
-        try:
-            st.write(f"Processing batch {i + 1} of {num_batches}")
-
-            # Get current batch
-            dam_batch = dam_data.toList(batch_size, i * batch_size)
-            dam_batch_fc = ee.FeatureCollection(dam_batch)
-
-            # Process through pipeline
-            s2_ic_batch = s2_export_for_visual(dam_batch_fc, add_upstream_downstream_elevation_band, elevation_dist,
-                                               waterway_fc)
-
-            s2_with_lst_et = s2_ic_batch.map(add_landsat_lst_et)
-            results_batch = s2_with_lst_et.map(compute_all_metrics_up_downstream)
-
-            # Convert to DataFrame
-            df_batch = geemap.ee_to_df(ee.FeatureCollection(results_batch))
-            df_list.append(df_batch)
-            progress_bar.progress((i + 1) / num_batches)
-        except Exception as e:
-            st.warning(f"Error processing batch {i + 1}: {e}")
-            continue
-
-    if not df_list:
-        display_validation_error("All batches failed processing. Please check your data.")
-        return None
-
-    # Combine results
-    final_df = pd.concat(df_list, ignore_index=True)
-    final_df["Dam_status"] = final_df["Dam_status"].replace({"positive": "Dam", "negative": "Non-dam"})
-
-    # Create visualization
-    fig2, axes2 = plt.subplots(4, 1, figsize=(12, 20))
-
-    def melt_and_plot(df, metric, ax):
-        melted = df.melt(
-            ["Image_year", "Image_month", "Dam_status"],
-            [f"{metric}_up", f"{metric}_down"],
-            "Flow",
-            metric,
-        )
-        melted["Flow"] = melted["Flow"].replace({f"{metric}_up": "Upstream", f"{metric}_down": "Downstream"})
-        sns.lineplot(
-            data=melted,
-            x="Image_month",
-            y=metric,
-            hue="Dam_status",
-            style="Flow",
-            markers=True,
-            ax=ax,
-        )
-        ax.set_title(f"{metric.upper()} by Month (Upstream vs Downstream)")
-        ax.set_xticks(range(1, 13))
-
-    for ax, met in zip(axes2, ["NDVI", "NDWI", "LST", "ET"]):
-        try:
-            melt_and_plot(final_df, met, ax)
-        except KeyError:
-            fig2.delaxes(ax)
-            st.warning(f"Unable to create map for {met}.")
-
-    plt.tight_layout()
-
-    SessionStateManager.set_multiple({"fig2": fig2, "final_df": final_df, "upstream_analysis_complete": True})
-
-    return {"figure": fig2, "dataframe": final_df}
-
-
 def create_export_dataframe(df, include_coordinates=True):
     """Create export DataFrame with coordinates"""
 
@@ -982,77 +891,33 @@ def render_step6():
         show_prerequisite_error("Step 6", [5])
         return
 
-    tab1, tab2 = st.tabs(["Combined Analysis", "Upstream & Downstream Analysis"])
+    if not SessionStateManager.get("visualization_complete", False):
+        if st.button("Analyze Combined Effects"):
+            with safe_processing("Analyzing combined effects"):
+                result = analyze_combined_effects(elevation_dist)
+                if result:
+                    display_success_message("Visualization complete!")
 
-    with tab1:
-        if not SessionStateManager.get("visualization_complete", False):
-            if st.button("Analyze Combined Effects"):
-                with safe_processing("Analyzing combined effects"):
-                    result = analyze_combined_effects(elevation_dist)
-                    if result:
-                        display_success_message("Visualization complete!")
+    if SessionStateManager.get("visualization_complete", False):
+        fig = SessionStateManager.get("fig")
+        df_lst = SessionStateManager.get("df_lst")
 
-        if SessionStateManager.get("visualization_complete", False):
-            fig = SessionStateManager.get("fig")
-            df_lst = SessionStateManager.get("df_lst")
+        if fig:
+            st.pyplot(fig)
 
-            if fig:
-                st.pyplot(fig)
+            col1, col2 = st.columns(2)
 
-                col1, col2 = st.columns(2)
+            with col1:
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png")
+                buf.seek(0)
+                st.download_button("Download Combined Figures", buf, "combined_trends.png", "image/png")
 
-                with col1:
-                    buf = io.BytesIO()
-                    fig.savefig(buf, format="png")
-                    buf.seek(0)
-                    st.download_button("Download Combined Figures", buf, "combined_trends.png", "image/png")
-
-                with col2:
-                    if df_lst is not None:
-                        export_df = create_export_dataframe(df_lst)
-                        csv = export_df.to_csv(index=False).encode("utf-8")
-                        st.download_button("Download Combined Data (CSV)", csv, "combined_data.csv", "text/csv")
-
-    with tab2:
-        if not SessionStateManager.get("upstream_analysis_complete", False):
-            if st.button("Analyze Upstream & Downstream Effects"):
-                with safe_processing("Analyzing Upstream & Downstream"):
-                    result = analyze_upstream_downstream(elevation_dist)
-                    if result:
-                        display_success_message("Upstream & downstream analysis completed successfully!")
-
-        if SessionStateManager.get("upstream_analysis_complete", False):
-            fig2 = SessionStateManager.get("fig2")
-            final_df = SessionStateManager.get("final_df")
-
-            if fig2:
-                st.pyplot(fig2)
-
-                col3, col4 = st.columns(2)
-
-                with col3:
-                    buf2 = io.BytesIO()
-                    fig2.savefig(buf2, format="png")
-                    buf2.seek(0)
-                    st.download_button(
-                        "Download Up/Downstream Figures",
-                        buf2,
-                        "upstream_downstream_trends.png",
-                        "image/png",
-                        key="download_updown_fig",
-                    )
-
-                with col4:
-                    if final_df is not None:
-                        export_df = create_export_dataframe(final_df)
-                        csv2 = export_df.to_csv(index=False).encode("utf-8")
-                        st.download_button(
-                            "Download Up/Downstream Data (CSV)",
-                            csv2,
-                            "upstream_downstream_data.csv",
-                            "text/csv",
-                            key="download_updown_csv",
-                        )
+            with col2:
+                if df_lst is not None:
+                    export_df = create_export_dataframe(df_lst)
+                    csv = export_df.to_csv(index=False).encode("utf-8")
+                    st.download_button("Download Combined Data (CSV)", csv, "combined_data.csv", "text/csv")
 
 
 main()
