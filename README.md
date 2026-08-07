@@ -63,7 +63,6 @@ final step calls `.getInfo()` / `geemap.ee_to_df()`.
 beaver-app-st/
 ├── app.py                        # Entry point: Streamlit multi-page navigation
 ├── pages/
-│   ├── about_lab.py              # Landing/"About" page with documentation
 │   └── analyze_impacts.py        # The entire 6-step analysis workflow
 ├── service/                      # Stateless libraries of functions
 │   ├── earth_engine_auth.py      # Centralized GEE initialization (imported everywhere)
