@@ -293,6 +293,11 @@ def display_year_selector_with_warning(widget_prefix, suffix=""):
     selected_year = st.selectbox(
         "Select a year:", list(range(2017, 2025)), index=3, key=f"{widget_prefix}{suffix}_year_selectbox"
     )
+    st.caption(
+        "This is the year your dam locations are analyzed against: satellite imagery is "
+        "drawn from within six months of 1 July of this year. You are not locked in — in "
+        "Step 6 you can optionally run a multi-year analysis to compare several years."
+    )
     selected_date = f"{selected_year}-07-01"
 
     if selected_year < 2020 or selected_year > 2025:
