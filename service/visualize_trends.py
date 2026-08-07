@@ -264,7 +264,11 @@ def add_landsat_lst_et(s2_image):
     )
     # STEP 2: PROCESS OPENET ET DATA
     et_collection = (
-        ee.ImageCollection("OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0")
+        # Successor to the deprecated "OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0".
+        # Same data under a project-based asset path: verified identical band list,
+        # identical temporal extent (1999-10-01..2024-12-01) and identical
+        # et_ensemble_mad values for the same region and month.
+        ee.ImageCollection("projects/openet/assets/ensemble/conus/gridmet/monthly/v2_0")
         .filterDate(start_date, end_date)
         .filterBounds(box_area)
     )
