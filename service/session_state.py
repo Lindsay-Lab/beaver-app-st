@@ -142,6 +142,8 @@ class SessionStateManager:
             "validation_step",
             "validation_summary",
             "analysis_coverage_warning",
+            "analysis_mode",
+            "analysis_label",
             "visualization_complete",
             "buffer_complete",
             "show_non_dam_section",

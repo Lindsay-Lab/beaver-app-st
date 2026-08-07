@@ -939,7 +939,19 @@ def analyze_combined_effects(elevation_dist):
 
     plt.tight_layout()
 
-    SessionStateManager.set_multiple({"fig": fig, "df_lst": df_lst, "visualization_complete": True})
+    SessionStateManager.set_multiple(
+        {
+            "fig": fig,
+            "df_lst": df_lst,
+            "visualization_complete": True,
+            # Tag which mode produced these results so the UI never shows a
+            # single-year figure while the user is looking at the multi-year controls.
+            "analysis_mode": "single",
+            "analysis_label": f"Single-year analysis ({int(df_lst['Image_year'].mode()[0])})"
+            if "Image_year" in df_lst.columns and not df_lst["Image_year"].dropna().empty
+            else "Single-year analysis",
+        }
+    )
 
     return {"figure": fig, "dataframe": df_lst}
 
@@ -1025,6 +1037,9 @@ def analyze_multiple_years(elevation_dist, years, months):
         if note:
             coverage_notes.append(note)
 
+        # Copy before tagging: never mutate a frame the caller may still hold a
+        # reference to, which would let one year's tag overwrite another's.
+        df_year = df_year.copy()
         df_year["analysis_year"] = year
         year_dfs.append(df_year)
 
@@ -1037,9 +1052,21 @@ def analyze_multiple_years(elevation_dist, years, months):
     )
 
     df_lst = pd.concat(year_dfs, ignore_index=True)
-    fig = plot_yearly_comparison(df_lst, years, months)
+    analyzed_years = sorted(df_lst["analysis_year"].unique())
+    fig = plot_yearly_comparison(df_lst, analyzed_years, months)
 
-    SessionStateManager.set_multiple({"fig": fig, "df_lst": df_lst, "visualization_complete": True})
+    month_desc = "all months" if len(months) == 12 else f"months {', '.join(str(m) for m in months)}"
+    SessionStateManager.set_multiple(
+        {
+            "fig": fig,
+            "df_lst": df_lst,
+            "visualization_complete": True,
+            "analysis_mode": "multi",
+            "analysis_label": (
+                f"Multi-year comparison: {', '.join(str(y) for y in analyzed_years)} ({month_desc})"
+            ),
+        }
+    )
 
     return {"figure": fig, "dataframe": df_lst}
 
@@ -1110,6 +1137,10 @@ def render_step6():
         "of July 1) and compare yearly averages for dam vs non-dam locations.",
     )
 
+    current_mode = "multi" if multi_year else "single"
+    stored_mode = SessionStateManager.get("analysis_mode")
+    has_results = SessionStateManager.get("visualization_complete", False) and stored_mode == current_mode
+
     if multi_year:
         years = st.multiselect("Years to analyze:", list(range(2017, 2025)), key="multi_year_years")
         months = st.multiselect(
@@ -1122,6 +1153,11 @@ def render_step6():
         if any(year < 2020 for year in years):
             st.warning("You may proceed, but ET data may not be available for some selected years.")
 
+        st.caption(
+            "Each selected year is analyzed separately, so this takes roughly as long as "
+            "the single-year analysis multiplied by the number of years."
+        )
+
         if st.button("Analyze Across Years"):
             if len(years) < 2:
                 st.warning("Please select at least two years to compare.")
@@ -1132,19 +1168,27 @@ def render_step6():
                     result = analyze_multiple_years(elevation_dist, sorted(years), sorted(months))
                     if result:
                         display_success_message("Multi-year analysis complete!")
+                        has_results = True
 
-    elif not SessionStateManager.get("visualization_complete", False):
+    elif not has_results:
         if st.button("Analyze Combined Effects"):
             with safe_processing("Analyzing combined effects"):
                 result = analyze_combined_effects(elevation_dist)
                 if result:
                     display_success_message("Visualization complete!")
+                    has_results = True
 
-    if SessionStateManager.get("visualization_complete", False):
+    if has_results:
         fig = SessionStateManager.get("fig")
         df_lst = SessionStateManager.get("df_lst")
 
         if fig:
+            # Say plainly which run produced what is on screen - the two modes share
+            # these session keys, so an unlabelled figure is easy to misread.
+            label = SessionStateManager.get("analysis_label")
+            if label:
+                st.caption(f"Showing: {label}")
+
             # Shown every time the results are displayed, not just on the run that
             # produced them, so the caveat cannot be scrolled or rerun away.
             coverage_warning = SessionStateManager.get("analysis_coverage_warning")
@@ -1153,19 +1197,30 @@ def render_step6():
 
             st.pyplot(fig)
 
+            prefix = "multi_year" if current_mode == "multi" else "combined"
             col1, col2 = st.columns(2)
 
             with col1:
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png")
                 buf.seek(0)
-                st.download_button("Download Combined Figures", buf, "combined_trends.png", "image/png")
+                st.download_button("Download Figures", buf, f"{prefix}_trends.png", "image/png")
 
             with col2:
                 if df_lst is not None:
                     export_df = create_export_dataframe(df_lst)
                     csv = export_df.to_csv(index=False).encode("utf-8")
-                    st.download_button("Download Combined Data (CSV)", csv, "combined_data.csv", "text/csv")
+                    st.download_button("Download Data (CSV)", csv, f"{prefix}_data.csv", "text/csv")
+
+    elif SessionStateManager.get("visualization_complete", False) and stored_mode:
+        # Results exist, but from the other mode. Say so instead of silently showing
+        # them, which would look like the analysis for THIS mode had already run.
+        other = "multi-year" if stored_mode == "multi" else "single-year"
+        this_one = "Analyze Across Years" if multi_year else "Analyze Combined Effects"
+        st.info(
+            f"Your most recent results are from the {other} analysis and are not shown here. "
+            f"Click '{this_one}' above to run this analysis."
+        )
 
 
 main()

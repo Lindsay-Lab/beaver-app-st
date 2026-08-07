@@ -59,6 +59,8 @@ class AppConstants:
         "validation_results": None,
         "validation_summary": None,
         "analysis_coverage_warning": None,
+        "analysis_mode": None,
+        "analysis_label": None,
         "df_lst": None,
         "fig": None,
         # Configuration
