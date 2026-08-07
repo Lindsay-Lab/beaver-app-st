@@ -113,9 +113,16 @@ def add_elevation_band(image, elev_dist):
     )
     elevation_masked2 = elevation_masked.updateMask(elevation_masked.eq(1))
 
-    # Add bands, create new "id" property to name the file, and clip the images to the ROI
+    # Add bands, create new "id" property to name the file, and clip the images to the ROI.
+    # id_property is carried through as well: _extract_metadata reads it, and without it
+    # the metrics DataFrame loses the column and the CSV export has to fall back to
+    # matching coordinates by row order.
     full_image = (
-        image.set("Dam_id", dam_id).set("Dam_status", dam_status).set("Area", buffered_area).clip(buffered_area)
+        image.set("Dam_id", dam_id)
+        .set("id_property", dam_id)
+        .set("Dam_status", dam_status)
+        .set("Area", buffered_area)
+        .clip(buffered_area)
     )
     full_image2 = full_image.addBands(elevation_masked2)
 

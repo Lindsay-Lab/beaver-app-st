@@ -28,9 +28,14 @@ class AppConstants:
     SAMPLING_SCALE = 10
     RADIUS_STEP = 50
 
-    # Processing settings
-    BATCH_SIZE = 30
+    # Processing settings.
+    # Earth Engine's per-request compute budget falls off a cliff for this pipeline:
+    # measured on a 2017 run, 6+ points per request took 143-177s (at the timeout
+    # boundary) while 5 or fewer took 9-21s. Keeping batches small is both faster
+    # overall and what stops "Computation timed out" errors.
+    BATCH_SIZE = 4
     MAX_RETRIES = 3
+    RETRY_BACKOFF_SECONDS = 2
 
     # UI settings
     MAP_WIDTH = 800

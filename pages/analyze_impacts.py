@@ -2,6 +2,7 @@
 
 import io
 import math
+import time
 
 import ee
 import geemap.foliumap as geemap
@@ -803,34 +804,58 @@ def compute_metrics_df(dam_data, elevation_dist):
     progress_bar = st.progress(0)
     st.write(f"Processing {total_count} dam points in {num_batches} batches")
 
+    failed_batches = []
+
     for i in range(num_batches):
-        try:
-            st.write(f"Processing batch {i + 1} of {num_batches}")
+        st.write(f"Processing batch {i + 1} of {num_batches}")
 
-            # Get current batch
-            dam_batch = dam_data.toList(batch_size, i * batch_size)
-            dam_batch_fc = ee.FeatureCollection(dam_batch)
+        # Get current batch
+        dam_batch = dam_data.toList(batch_size, i * batch_size)
+        dam_batch_fc = ee.FeatureCollection(dam_batch)
 
-            # Process batch through pipeline
-            s2_cloud_mask_batch = ee.ImageCollection(s2_export_for_visual(dam_batch_fc, add_elevation_band,
-                                                                          elevation_dist))
-            s2_image_collection_batch = ee.ImageCollection(s2_cloud_mask_batch)
-            s2_with_lst_batch = s2_image_collection_batch.map(add_landsat_lst_et)
-            results_fc_lst_batch = s2_with_lst_batch.map(compute_all_metrics_lst_et)
-            results_fcc_lst_batch = ee.FeatureCollection(results_fc_lst_batch)
+        # Earth Engine timeouts here are transient - the same request usually
+        # succeeds on a retry - so don't discard a batch on the first failure.
+        last_error = None
+        for attempt in range(AppConstants.MAX_RETRIES):
+            try:
+                # Process batch through pipeline
+                s2_cloud_mask_batch = ee.ImageCollection(
+                    s2_export_for_visual(dam_batch_fc, add_elevation_band, elevation_dist)
+                )
+                s2_image_collection_batch = ee.ImageCollection(s2_cloud_mask_batch)
+                s2_with_lst_batch = s2_image_collection_batch.map(add_landsat_lst_et)
+                results_fc_lst_batch = s2_with_lst_batch.map(compute_all_metrics_lst_et)
+                results_fcc_lst_batch = ee.FeatureCollection(results_fc_lst_batch)
 
-            # Convert to DataFrame
-            df_batch = geemap.ee_to_df(results_fcc_lst_batch)
-            df_list.append(df_batch)
+                # Convert to DataFrame
+                df_batch = geemap.ee_to_df(results_fcc_lst_batch)
+                df_list.append(df_batch)
+                last_error = None
+                break
+            except Exception as e:  # pylint: disable=broad-except
+                last_error = e
+                if attempt < AppConstants.MAX_RETRIES - 1:
+                    st.write(f"  Batch {i + 1} failed ({e}); retrying...")
+                    time.sleep(AppConstants.RETRY_BACKOFF_SECONDS * (attempt + 1))
 
-            progress_bar.progress((i + 1) / num_batches)
-        except Exception as e:
-            st.warning(f"Error processing batch {i + 1}: {e}")
-            continue
+        if last_error is not None:
+            failed_batches.append(i + 1)
+            st.warning(f"Error processing batch {i + 1} after {AppConstants.MAX_RETRIES} attempts: {last_error}")
+
+        progress_bar.progress((i + 1) / num_batches)
 
     if not df_list:
         display_validation_error("No data could be processed from any batch.")
         return None
+
+    # Be explicit when results are partial - silently returning fewer points than
+    # the user uploaded would misrepresent the analysis.
+    if failed_batches:
+        st.warning(
+            f"{len(failed_batches)} of {num_batches} batches failed "
+            f"(batch(es) {', '.join(str(b) for b in failed_batches)}). "
+            "Results below cover only the points that processed successfully."
+        )
 
     # Combine results
     df_lst = pd.concat(df_list, ignore_index=True)
@@ -995,7 +1020,6 @@ def create_export_dataframe(df, include_coordinates=True):
         coords_df = extract_coordinates_df(SessionStateManager.get("Dam_data"))
 
         if not coords_df.empty:
-            # determine why id_property is being lost in df conversion from `results_fcc_lst_batch` to `df_batch`
             if "id_property" in export_df.columns:
                 export_df = export_df.merge(coords_df, on="id_property", how="left")
                 export_df["longitude"] = export_df["longitude"].fillna(0)
