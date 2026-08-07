@@ -721,7 +721,10 @@ def create_buffers(buffer_radius):
 
     dam_data = buffer_merged_points(merged_collection, buffer_radius)
 
-    SessionStateManager.set_multiple({"Dam_data": dam_data, "buffers_created": True})
+    # Clear the cached point count so the Step 6 runtime estimate reflects the new buffers.
+    SessionStateManager.set_multiple(
+        {"Dam_data": dam_data, "buffers_created": True, "analysis_point_count": None}
+    )
 
     return dam_data
 
@@ -1117,6 +1120,40 @@ def create_export_dataframe(df, include_coordinates=True):
     return export_df
 
 
+def estimate_runtime_minutes(n_points, n_years=1):
+    """Rough wall-clock estimate for an analysis run, in minutes."""
+    return (n_points * n_years * AppConstants.SECONDS_PER_POINT_YEAR) / 60.0
+
+
+def show_runtime_estimate(n_points, n_years=1):
+    """Warn about long runs before they start.
+
+    A large analysis can exceed how long a Streamlit session stays connected: the run
+    is synchronous, so if the browser disconnects the results are lost with no error.
+    Telling users the cost up front is the difference between an informed choice and
+    an hour of apparent silence.
+    """
+    if not n_points:
+        return
+
+    minutes = estimate_runtime_minutes(n_points, n_years)
+    scope = f"{n_points} locations" + (f" x {n_years} years" if n_years > 1 else "")
+
+    if minutes < AppConstants.RUNTIME_WARNING_MINUTES:
+        st.caption(f"Estimated runtime: about {minutes:.0f} minute(s) for {scope}.")
+        return
+
+    hours = minutes / 60.0
+    pretty = f"{minutes:.0f} minutes" if minutes < 90 else f"{hours:.1f} hours"
+    st.warning(
+        f"This run covers {scope} and is estimated to take about {pretty}. "
+        "The analysis runs live in your browser session, so if the connection drops "
+        "before it finishes the results are lost without an error message. For runs "
+        "this large, analyze fewer locations (or fewer years) at a time and combine "
+        "the downloaded CSVs afterwards."
+    )
+
+
 def render_step6():
     """Step 6: Visualize Trends"""
     st.header("Step 6: Visualize Trends")
@@ -1141,6 +1178,16 @@ def render_step6():
     stored_mode = SessionStateManager.get("analysis_mode")
     has_results = SessionStateManager.get("visualization_complete", False) and stored_mode == current_mode
 
+    # Point count drives the runtime estimate. Cached because it costs a round-trip.
+    n_points = SessionStateManager.get("analysis_point_count")
+    if n_points is None:
+        dam_data = SessionStateManager.get_dam_data()
+        try:
+            n_points = int(dam_data.size().getInfo()) if dam_data else 0
+        except Exception:  # pylint: disable=broad-except
+            n_points = 0
+        SessionStateManager.set("analysis_point_count", n_points)
+
     if multi_year:
         years = st.multiselect("Years to analyze:", list(range(2017, 2025)), key="multi_year_years")
         months = st.multiselect(
@@ -1157,6 +1204,7 @@ def render_step6():
             "Each selected year is analyzed separately, so this takes roughly as long as "
             "the single-year analysis multiplied by the number of years."
         )
+        show_runtime_estimate(n_points, max(1, len(years)))
 
         if st.button("Analyze Across Years"):
             if len(years) < 2:
@@ -1171,6 +1219,7 @@ def render_step6():
                         has_results = True
 
     elif not has_results:
+        show_runtime_estimate(n_points)
         if st.button("Analyze Combined Effects"):
             with safe_processing("Analyzing combined effects"):
                 result = analyze_combined_effects(elevation_dist)

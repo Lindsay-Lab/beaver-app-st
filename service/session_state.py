@@ -143,6 +143,7 @@ class SessionStateManager:
             "validation_summary",
             "analysis_coverage_warning",
             "analysis_mode",
+            "analysis_point_count",
             "analysis_label",
             "visualization_complete",
             "buffer_complete",
