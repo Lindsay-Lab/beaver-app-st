@@ -508,12 +508,28 @@ def generate_negative_points(inner_radius, outer_radius, sampling_scale):
     hydro_raster = prepare_hydro(waterway_fc)
     negative_points = sample_negative_points(positive_dams_fc, hydro_raster, inner_radius, outer_radius, sampling_scale)
 
-    if negative_points.size().getInfo() == 0:
+    # Resolve the sampling graph once. Left lazy, the paint -> focal_max ->
+    # stratifiedSample chain is re-evaluated by every consumer, including each map
+    # tile request, whose compute budget is far tighter than a plain getInfo. On
+    # larger inputs that surfaces as "Computation timed out" when drawing the layer.
+    sampled = negative_points.getInfo()
+
+    if not sampled.get("features"):
         display_validation_error(
             "No negative points were generated.",
             ["Try adjusting the radius parameters", "Check that there's sufficient area for sampling"],
         )
         return None
+
+    # Rebuild from raw coordinates: getInfo emits a 'geodesic' key that Earth
+    # Engine's own Geometry constructor rejects, so the GeoJSON cannot be fed back
+    # in as-is.
+    negative_points = ee.FeatureCollection(
+        [
+            ee.Feature(ee.Geometry.Point(feature["geometry"]["coordinates"]), feature.get("properties") or {})
+            for feature in sampled["features"]
+        ]
+    )
 
     # Set date for negative points
     first_pos = positive_dams_fc.first()
