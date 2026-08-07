@@ -812,8 +812,13 @@ def describe_incomplete_coverage(coverage, label=None):
     )
 
 
-def compute_metrics_df(dam_data, elevation_dist):
-    """Run the batched metric pipeline over buffered points and return a DataFrame"""
+def compute_metrics_df(dam_data, elevation_dist, checkpoint_key=None):
+    """Run the batched metric pipeline over buffered points and return a DataFrame.
+
+    Completed batches are checkpointed into session state under ``checkpoint_key``. A
+    long run that is interrupted - a dropped connection, a browser refresh - can then be
+    restarted and will reuse everything already computed instead of starting over.
+    """
     dam_data = dam_data.filter(ee.Filter.notNull(["Survey_Date"]))
     total_count = dam_data.size().getInfo()
 
@@ -827,14 +832,32 @@ def compute_metrics_df(dam_data, elevation_dist):
     # Process data in batches
     batch_size = AppConstants.BATCH_SIZE
     num_batches = (total_count + batch_size - 1) // batch_size
-    df_list = []
+
+    # Checkpoints are keyed by the run's parameters, so changing the points, the
+    # elevation distance or the batch size starts a fresh set rather than mixing
+    # results from different analyses.
+    store_key = None
+    completed = {}
+    if checkpoint_key is not None:
+        store_key = f"batch_checkpoint::{checkpoint_key}::{total_count}::{elevation_dist}::{batch_size}"
+        completed = dict(SessionStateManager.get(store_key) or {})
 
     progress_bar = st.progress(0)
     st.write(f"Processing {total_count} dam points in {num_batches} batches")
 
+    if completed:
+        st.info(
+            f"Resuming: {len(completed)} of {num_batches} batches were already completed "
+            "in an earlier attempt and will be reused."
+        )
+
     failed_batches = []
 
     for i in range(num_batches):
+        if i in completed:
+            progress_bar.progress((i + 1) / num_batches)
+            continue
+
         st.write(f"Processing batch {i + 1} of {num_batches}")
 
         # Get current batch
@@ -857,7 +880,11 @@ def compute_metrics_df(dam_data, elevation_dist):
 
                 # Convert to DataFrame
                 df_batch = geemap.ee_to_df(results_fcc_lst_batch)
-                df_list.append(df_batch)
+                completed[i] = df_batch
+                # Checkpoint after every batch, so an interruption at any point keeps
+                # everything computed so far.
+                if store_key is not None:
+                    SessionStateManager.set(store_key, dict(completed))
                 last_error = None
                 break
             except Exception as e:  # pylint: disable=broad-except
@@ -872,12 +899,13 @@ def compute_metrics_df(dam_data, elevation_dist):
 
         progress_bar.progress((i + 1) / num_batches)
 
-    if not df_list:
+    if not completed:
         display_validation_error("No data could be processed from any batch.")
         return None, None
 
-    # Combine results
-    df_lst = pd.concat(df_list, ignore_index=True)
+    # Combine results in batch order so output does not depend on which batches were
+    # reused from a checkpoint versus computed in this attempt.
+    df_lst = pd.concat([completed[i] for i in sorted(completed)], ignore_index=True)
     df_lst["Image_month"] = pd.to_numeric(df_lst["Image_month"])
     df_lst["Image_year"] = pd.to_numeric(df_lst["Image_year"])
     df_lst["Dam_status"] = df_lst["Dam_status"].replace({"positive": "Dam", "negative": "Non-dam"})
@@ -891,6 +919,12 @@ def compute_metrics_df(dam_data, elevation_dist):
         "failed_batches": failed_batches,
         "num_batches": num_batches,
     }
+
+    # Drop the checkpoint once every batch has succeeded - keeping it would let a later
+    # run silently reuse this run's results instead of recomputing.
+    if store_key is not None and not failed_batches and len(completed) == num_batches:
+        SessionStateManager.delete(store_key)
+
     return df_lst, coverage
 
 
@@ -911,7 +945,7 @@ def analyze_combined_effects(elevation_dist):
 
     dam_data = dam_data.map(validate_date)
 
-    df_lst, coverage = compute_metrics_df(dam_data, elevation_dist)
+    df_lst, coverage = compute_metrics_df(dam_data, elevation_dist, checkpoint_key="single")
     if df_lst is None:
         return None
 
@@ -1030,7 +1064,7 @@ def analyze_multiple_years(elevation_dist, years, months):
         dated_collection = merged_collection.map(lambda feature, date=full_date: feature.set("date", date))
         dam_data = buffer_merged_points(dated_collection, buffer_radius)
 
-        df_year, coverage = compute_metrics_df(dam_data, elevation_dist)
+        df_year, coverage = compute_metrics_df(dam_data, elevation_dist, checkpoint_key=f"year-{year}")
         if df_year is None or df_year.empty:
             st.warning(f"No data could be processed for {year}.")
             coverage_notes.append(f"{year}: no data could be processed (year omitted entirely)")
