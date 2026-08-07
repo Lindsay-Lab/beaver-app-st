@@ -1052,29 +1052,40 @@ def create_export_dataframe(df, include_coordinates=True):
 
     export_df = df.copy()
 
-    export_df["longitude"] = 0
-    export_df["latitude"] = 0
-
+    coords_df = pd.DataFrame()
     if SessionStateManager.has("Dam_data"):
         coords_df = extract_coordinates_df(SessionStateManager.get("Dam_data"))
 
-        if not coords_df.empty:
-            if "id_property" in export_df.columns:
-                export_df = export_df.merge(coords_df, on="id_property", how="left")
-                export_df["longitude"] = export_df["longitude"].fillna(0)
-                export_df["latitude"] = export_df["latitude"].fillna(0)
-            else:
-                if len(export_df) > len(coords_df):
-                    months_per_point = len(export_df) // len(coords_df)
-                    longitudes, latitudes = [], []
+    if not coords_df.empty and "id_property" in export_df.columns:
+        # Join coordinates on id_property. Any existing longitude/latitude columns must
+        # be dropped first: merging on overlapping names yields longitude_x/longitude_y
+        # and leaves no plain "longitude" column to read back.
+        export_df = export_df.drop(columns=[c for c in ("longitude", "latitude") if c in export_df.columns])
+        export_df = export_df.merge(
+            coords_df[["id_property", "longitude", "latitude"]], on="id_property", how="left"
+        )
+        export_df["longitude"] = export_df["longitude"].fillna(0)
+        export_df["latitude"] = export_df["latitude"].fillna(0)
+        return export_df
 
-                    for i in range(len(coords_df)):
-                        coords = coords_df.iloc[i]
-                        longitudes.extend([coords["longitude"]]*months_per_point)
-                        latitudes.extend([coords["latitude"]]*months_per_point)
+    # Fallback for data without id_property: line coordinates up positionally, assuming
+    # each point contributes the same number of rows. Only applied when the row counts
+    # actually agree, so a mismatch leaves zeros rather than raising or mispairing.
+    export_df["longitude"] = 0
+    export_df["latitude"] = 0
 
-                    export_df["longitude"] = longitudes
-                    export_df["latitude"] = latitudes
+    if not coords_df.empty and len(export_df) > len(coords_df):
+        months_per_point = len(export_df) // len(coords_df)
+        longitudes, latitudes = [], []
+
+        for i in range(len(coords_df)):
+            coords = coords_df.iloc[i]
+            longitudes.extend([coords["longitude"]] * months_per_point)
+            latitudes.extend([coords["latitude"]] * months_per_point)
+
+        if len(longitudes) == len(export_df):
+            export_df["longitude"] = longitudes
+            export_df["latitude"] = latitudes
 
     return export_df
 
