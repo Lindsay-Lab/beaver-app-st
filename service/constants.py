@@ -58,6 +58,7 @@ class AppConstants:
         "Merged_collection": None,
         "validation_results": None,
         "validation_summary": None,
+        "analysis_coverage_warning": None,
         "df_lst": None,
         "fig": None,
         # Configuration

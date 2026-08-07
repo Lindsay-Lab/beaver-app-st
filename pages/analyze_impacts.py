@@ -784,6 +784,31 @@ def render_step5():
                 display_success_message(f"Buffers created successfully with radius {buffer_radius} meters!")
 
 
+def describe_incomplete_coverage(coverage, label=None):
+    """Return a user-facing warning if an analysis run did not cover every location.
+
+    Returns None when coverage is complete, so callers can store the result directly
+    and treat "no message" as "nothing was dropped".
+    """
+    if not coverage:
+        return None
+
+    expected = coverage.get("expected_points", 0)
+    analyzed = coverage.get("analyzed_points", 0)
+    failed = coverage.get("failed_batches") or []
+    if not failed and analyzed >= expected:
+        return None
+
+    missing = max(0, expected - analyzed)
+    scope = f" for {label}" if label else ""
+    return (
+        f"Incomplete results{scope}: {analyzed} of {expected} locations were analyzed "
+        f"({missing} missing, from {len(failed)} of {coverage.get('num_batches', 0)} "
+        "batches that failed after retries). The figures and CSV below are based only on "
+        "the locations that processed successfully. Re-run the analysis to try again."
+    )
+
+
 def compute_metrics_df(dam_data, elevation_dist):
     """Run the batched metric pipeline over buffered points and return a DataFrame"""
     dam_data = dam_data.filter(ee.Filter.notNull(["Survey_Date"]))
@@ -794,7 +819,7 @@ def compute_metrics_df(dam_data, elevation_dist):
             "No valid data with dates found.",
             ["Check your data for valid date fields", "Ensure date format is correct"],
         )
-        return None
+        return None, None
 
     # Process data in batches
     batch_size = AppConstants.BATCH_SIZE
@@ -846,23 +871,24 @@ def compute_metrics_df(dam_data, elevation_dist):
 
     if not df_list:
         display_validation_error("No data could be processed from any batch.")
-        return None
-
-    # Be explicit when results are partial - silently returning fewer points than
-    # the user uploaded would misrepresent the analysis.
-    if failed_batches:
-        st.warning(
-            f"{len(failed_batches)} of {num_batches} batches failed "
-            f"(batch(es) {', '.join(str(b) for b in failed_batches)}). "
-            "Results below cover only the points that processed successfully."
-        )
+        return None, None
 
     # Combine results
     df_lst = pd.concat(df_list, ignore_index=True)
     df_lst["Image_month"] = pd.to_numeric(df_lst["Image_month"])
     df_lst["Image_year"] = pd.to_numeric(df_lst["Image_year"])
     df_lst["Dam_status"] = df_lst["Dam_status"].replace({"positive": "Dam", "negative": "Non-dam"})
-    return df_lst
+
+    # Report coverage back to the caller so the shortfall can be shown alongside the
+    # figures and CSV, not just as a transient message during processing.
+    analyzed_points = int(df_lst["id_property"].nunique()) if "id_property" in df_lst.columns else 0
+    coverage = {
+        "expected_points": int(total_count),
+        "analyzed_points": analyzed_points,
+        "failed_batches": failed_batches,
+        "num_batches": num_batches,
+    }
+    return df_lst, coverage
 
 
 @handle_processing_errors("combined effects analysis")
@@ -882,9 +908,11 @@ def analyze_combined_effects(elevation_dist):
 
     dam_data = dam_data.map(validate_date)
 
-    df_lst = compute_metrics_df(dam_data, elevation_dist)
+    df_lst, coverage = compute_metrics_df(dam_data, elevation_dist)
     if df_lst is None:
         return None
+
+    SessionStateManager.set("analysis_coverage_warning", describe_incomplete_coverage(coverage))
 
     # Create visualization
     fig, axes = plt.subplots(4, 1, figsize=(12, 18))
@@ -977,6 +1005,7 @@ def analyze_multiple_years(elevation_dist, years, months):
     buffer_radius = SessionStateManager.get("buffer_radius_input", SessionStateManager.get("buffer_radius"))
 
     year_dfs = []
+    coverage_notes = []
     for year in years:
         st.write(f"Analyzing year {year}")
 
@@ -986,16 +1015,26 @@ def analyze_multiple_years(elevation_dist, years, months):
         dated_collection = merged_collection.map(lambda feature, date=full_date: feature.set("date", date))
         dam_data = buffer_merged_points(dated_collection, buffer_radius)
 
-        df_year = compute_metrics_df(dam_data, elevation_dist)
+        df_year, coverage = compute_metrics_df(dam_data, elevation_dist)
         if df_year is None or df_year.empty:
             st.warning(f"No data could be processed for {year}.")
+            coverage_notes.append(f"{year}: no data could be processed (year omitted entirely)")
             continue
+
+        note = describe_incomplete_coverage(coverage, label=str(year))
+        if note:
+            coverage_notes.append(note)
+
         df_year["analysis_year"] = year
         year_dfs.append(df_year)
 
     if not year_dfs:
         display_validation_error("No data could be processed for any selected year.")
         return None
+
+    SessionStateManager.set(
+        "analysis_coverage_warning", "\n\n".join(coverage_notes) if coverage_notes else None
+    )
 
     df_lst = pd.concat(year_dfs, ignore_index=True)
     fig = plot_yearly_comparison(df_lst, years, months)
@@ -1095,6 +1134,12 @@ def render_step6():
         df_lst = SessionStateManager.get("df_lst")
 
         if fig:
+            # Shown every time the results are displayed, not just on the run that
+            # produced them, so the caveat cannot be scrolled or rerun away.
+            coverage_warning = SessionStateManager.get("analysis_coverage_warning")
+            if coverage_warning:
+                st.warning(coverage_warning)
+
             st.pyplot(fig)
 
             col1, col2 = st.columns(2)
