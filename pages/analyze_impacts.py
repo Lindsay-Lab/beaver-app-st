@@ -1155,8 +1155,14 @@ def create_export_dataframe(df, include_coordinates=True):
 
 
 def estimate_runtime_minutes(n_points, n_years=1):
-    """Rough wall-clock estimate for an analysis run, in minutes."""
-    return (n_points * n_years * AppConstants.SECONDS_PER_POINT_YEAR) / 60.0
+    """Rough wall-clock estimate for an analysis run, in minutes.
+
+    Constants are read with getattr defaults: Streamlit can reload this module while
+    keeping an older ``service.constants`` in sys.modules, and a missing attribute here
+    must not be able to take down the page.
+    """
+    seconds_each = getattr(AppConstants, "SECONDS_PER_POINT_YEAR", 20)
+    return (n_points * n_years * seconds_each) / 60.0
 
 
 def show_runtime_estimate(n_points, n_years=1):
@@ -1170,22 +1176,27 @@ def show_runtime_estimate(n_points, n_years=1):
     if not n_points:
         return
 
-    minutes = estimate_runtime_minutes(n_points, n_years)
-    scope = f"{n_points} locations" + (f" x {n_years} years" if n_years > 1 else "")
+    # This is advisory only - never let it interrupt the analysis it describes.
+    try:
+        minutes = estimate_runtime_minutes(n_points, n_years)
+        scope = f"{n_points} locations" + (f" x {n_years} years" if n_years > 1 else "")
+        threshold = getattr(AppConstants, "RUNTIME_WARNING_MINUTES", 20)
 
-    if minutes < AppConstants.RUNTIME_WARNING_MINUTES:
-        st.caption(f"Estimated runtime: about {minutes:.0f} minute(s) for {scope}.")
+        if minutes < threshold:
+            st.caption(f"Estimated runtime: about {minutes:.0f} minute(s) for {scope}.")
+            return
+
+        hours = minutes / 60.0
+        pretty = f"{minutes:.0f} minutes" if minutes < 90 else f"{hours:.1f} hours"
+        st.warning(
+            f"This run covers {scope} and is estimated to take about {pretty}. "
+            "The analysis runs live in your browser session, so if the connection drops "
+            "before it finishes the results are lost without an error message. For runs "
+            "this large, analyze fewer locations (or fewer years) at a time and combine "
+            "the downloaded CSVs afterwards."
+        )
+    except Exception:  # pylint: disable=broad-except
         return
-
-    hours = minutes / 60.0
-    pretty = f"{minutes:.0f} minutes" if minutes < 90 else f"{hours:.1f} hours"
-    st.warning(
-        f"This run covers {scope} and is estimated to take about {pretty}. "
-        "The analysis runs live in your browser session, so if the connection drops "
-        "before it finishes the results are lost without an error message. For runs "
-        "this large, analyze fewer locations (or fewer years) at a time and combine "
-        "the downloaded CSVs afterwards."
-    )
 
 
 def render_step6():
