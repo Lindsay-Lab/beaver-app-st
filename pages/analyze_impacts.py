@@ -28,6 +28,7 @@ from service.session_state import SessionStateManager, check_prerequisites, show
 from service.validation import (
     check_waterway_intersection,
     generate_validation_report,
+    resolve_validation_summary,
     validate_dam_waterway_distance,
     visualize_validation_results,
 )
@@ -278,10 +279,18 @@ def perform_dam_validation(max_distance):
     return validation_results
 
 
-def handle_validation_results(validation_results):
+def handle_validation_results(validation_results, summary=None):
     """Handle validation results and user decisions"""
-    valid_count = validation_results["valid_count"].getInfo()
-    invalid_count = validation_results["invalid_count"].getInfo()
+    # Reuse the already-resolved summary when available. This runs on every rerun
+    # while the options are displayed, and each .getInfo() would otherwise re-run the
+    # whole dam-to-waterway distance computation.
+    if summary is None:
+        summary = SessionStateManager.get("validation_summary")
+    if summary is None:
+        summary = resolve_validation_summary(validation_results)
+
+    valid_count = summary["valid_count"]
+    invalid_count = summary["invalid_count"]
 
     if valid_count == 0:
         display_validation_error(
@@ -362,13 +371,20 @@ def render_step3():
                 validation_results = perform_dam_validation(max_distance)
 
                 if validation_results:
-                    # Store validation results and display report
+                    # Resolve the counts once here; the report, the options handler and
+                    # every subsequent rerun all read from this cached summary.
+                    summary = resolve_validation_summary(validation_results)
+
                     SessionStateManager.set_multiple(
-                        {"validation_results": validation_results, "validation_step": "show_options"}
+                        {
+                            "validation_results": validation_results,
+                            "validation_summary": summary,
+                            "validation_step": "show_options",
+                        }
                     )
 
                     st.subheader("Validation Report")
-                    st.text(generate_validation_report(validation_results))
+                    st.text(generate_validation_report(validation_results, summary))
 
                     # Display validation map
                     st.subheader("Validation Map")

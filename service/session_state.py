@@ -140,6 +140,7 @@ class SessionStateManager:
         state_to_reset = [
             "validation_complete",
             "validation_step",
+            "validation_summary",
             "visualization_complete",
             "buffer_complete",
             "show_non_dam_section",

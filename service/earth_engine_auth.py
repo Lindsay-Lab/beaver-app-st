@@ -48,6 +48,9 @@ def load_local_config():
     return None
 
 
+_INITIALIZED = False
+
+
 def is_earth_engine_initialized():
     """
     Check if Google Earth Engine is already initialized.
@@ -72,15 +75,24 @@ def initialize_earth_engine():
     including credential retrieval and project setup.
     """
 
+    # Streamlit re-executes the page module on every interaction, so this function
+    # runs constantly. is_earth_engine_initialized() costs a server round-trip, so
+    # remember the result in module state (which survives reruns) and skip it.
+    global _INITIALIZED  # pylint: disable=global-statement
+    if _INITIALIZED:
+        return
+
     # Check if Earth Engine is already initialized
     if is_earth_engine_initialized():
         # st.info("Earth Engine is already initialized")
+        _INITIALIZED = True
         return
 
     try:
         credentials = get_credentials()
         project_id = st.secrets["gcp_service_account"]["project_id"]
         ee.Initialize(credentials, project=project_id)
+        _INITIALIZED = True
         st.success("Earth Engine initialized with service account")
     except (KeyError, FileNotFoundError):
         config = load_local_config()
@@ -95,6 +107,7 @@ def initialize_earth_engine():
             ee.Authenticate()
             project_id = config["development"]["earth_engine"]["project_id"]
             ee.Initialize(project=project_id)
+            _INITIALIZED = True
             st.success("Earth Engine initialized with user authentication (local mode)")
         except Exception as e:  # pylint: disable=broad-except
             st.error(f"Earth Engine Authentication Error: {e}")

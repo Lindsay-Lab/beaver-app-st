@@ -104,12 +104,37 @@ def check_waterway_intersection(dam_collection: ee.FeatureCollection, waterway_f
         raise
 
 
-def generate_validation_report(validation_results: Dict) -> str:
+def resolve_validation_summary(validation_results: Dict) -> Dict:
+    """
+    Resolve the lazy validation results into plain Python values in ONE round-trip.
+
+    The values returned by validate_dam_waterway_distance are unevaluated Earth Engine
+    objects, so every separate .getInfo() re-runs the whole dam-to-waterway distance
+    computation server-side. Bundling them into a single ee.Dictionary evaluates the
+    shared graph once. Only each invalid dam's coordinates are needed downstream, so
+    those are fetched as a plain array rather than a whole FeatureCollection.
+
+    Returns:
+        dict with valid_count, invalid_count, total_dams, invalid_coords
+    """
+    return ee.Dictionary(
+        {
+            "valid_count": validation_results["valid_count"],
+            "invalid_count": validation_results["invalid_count"],
+            "total_dams": validation_results["total_dams"],
+            "invalid_coords": validation_results["invalid_dams_info"].aggregate_array("coordinates"),
+        }
+    ).getInfo()
+
+
+def generate_validation_report(validation_results: Dict, summary: Dict = None) -> str:
     """
     Generate a human-readable validation report
 
     Args:
         validation_results: Dictionary containing validation results
+        summary: Optional pre-resolved summary from resolve_validation_summary(). Pass
+            it to avoid re-running the distance computation.
 
     Returns:
         Formatted report text
@@ -118,9 +143,12 @@ def generate_validation_report(validation_results: Dict) -> str:
         report = []
 
         if "valid_count" in validation_results and "invalid_count" in validation_results:
-            valid_count = validation_results["valid_count"].getInfo()
-            invalid_count = validation_results["invalid_count"].getInfo()
-            total_dams = validation_results["total_dams"].getInfo()
+            if summary is None:
+                summary = resolve_validation_summary(validation_results)
+
+            valid_count = summary["valid_count"]
+            invalid_count = summary["invalid_count"]
+            total_dams = summary["total_dams"]
 
             report.append(f"Total dams: {total_dams}")
             report.append(f"Valid dams: {valid_count}")
@@ -132,11 +160,7 @@ def generate_validation_report(validation_results: Dict) -> str:
                 report.append("\nAll dams are valid!")
             else:
                 report.append(f"\nFound {invalid_count} dams that are too far from waterways:")
-                # Get invalid dams info
-                invalid_dams_info = validation_results["invalid_dams_info"].getInfo()
-                for i, feature in enumerate(invalid_dams_info["features"], 1):
-                    props = feature["properties"]
-                    coords = props["coordinates"]
+                for i, coords in enumerate(summary["invalid_coords"], 1):
                     report.append(f"- Point #{i}, Location: [{coords[0]:.6f}, {coords[1]:.6f}]")
 
         return "\n".join(report)

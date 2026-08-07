@@ -52,6 +52,7 @@ class AppConstants:
         "selected_waterway": None,
         "Merged_collection": None,
         "validation_results": None,
+        "validation_summary": None,
         "df_lst": None,
         "fig": None,
         # Configuration
