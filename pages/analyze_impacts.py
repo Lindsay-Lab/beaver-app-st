@@ -1,5 +1,6 @@
 """Primary page for analyzing dam impacts"""
 
+import datetime
 import io
 import math
 import time
@@ -1234,7 +1235,8 @@ def render_step6():
         SessionStateManager.set("analysis_point_count", n_points)
 
     if multi_year:
-        years = st.multiselect("Years to analyze:", list(range(2017, 2025)), key="multi_year_years")
+        _max_year = max(datetime.date.today().year, 2026)
+        years = st.multiselect("Years to analyze:", list(range(2017, _max_year + 1)), key="multi_year_years")
         months = st.multiselect(
             "Months to include in each yearly average:",
             list(range(1, 13)),

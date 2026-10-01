@@ -3,6 +3,7 @@ Utilities for parsing inputs into appropriate formats.
 """
 
 import csv
+import datetime
 import json
 from io import StringIO
 
@@ -290,8 +291,9 @@ def create_ee_features_from_geojson(geojson, date):
 
 def display_year_selector_with_warning(widget_prefix, suffix=""):
     """Show year selector and ET data warnings, return selected date"""
+    _max_year = max(datetime.date.today().year, 2026)
     selected_year = st.selectbox(
-        "Select a year:", list(range(2017, 2025)), index=3, key=f"{widget_prefix}{suffix}_year_selectbox"
+        "Select a year:", list(range(2017, _max_year + 1)), index=3, key=f"{widget_prefix}{suffix}_year_selectbox"
     )
     st.caption(
         "This is the year your dam locations are analyzed against: satellite imagery is "
