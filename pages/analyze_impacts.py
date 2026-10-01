@@ -2,12 +2,12 @@
 
 import datetime
 import io
-import math
 import time
 
 import ee
 import geemap.foliumap as geemap
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import streamlit as st
@@ -27,6 +27,7 @@ from service.negative_sampling import prepare_hydro, sample_negative_points
 from service.parser import extract_coordinates_df, upload_non_dam_points_to_ee, upload_points_to_ee, \
     upload_waterway_to_ee
 from service.session_state import SessionStateManager, check_prerequisites, show_prerequisite_error
+from service.statistics import location_means, t_interval
 from service.validation import (
     check_waterway_intersection,
     generate_validation_report,
@@ -955,30 +956,7 @@ def analyze_combined_effects(elevation_dist):
 
     SessionStateManager.set("analysis_coverage_warning", describe_incomplete_coverage(coverage))
 
-    # Create visualization
-    fig, axes = plt.subplots(4, 1, figsize=(12, 18))
-    metrics = ["NDVI", "NDWI_Green", "LST", "ET"]
-    titles = ["NDVI", "NDWI Green", "LST (°C)", "ET (mm)"]
-
-    for ax, metric, title in zip(axes, metrics, titles):
-        try:
-            sns.lineplot(
-                data=df_lst,
-                x="Image_month",
-                y=metric,
-                hue="Dam_status",
-                style="Dam_status",
-                markers=True,
-                dashes=False,
-                ax=ax,
-            )
-            ax.set_title(f"{title} by Month", fontsize=14)
-            ax.set_xticks(range(1, 13))
-        except ValueError:
-            fig.delaxes(ax)
-            st.warning(f"Unable to create map for {title}.")
-
-    plt.tight_layout()
+    fig = plot_single_year(df_lst)
 
     SessionStateManager.set_multiple(
         {
@@ -997,53 +975,102 @@ def analyze_combined_effects(elevation_dist):
     return {"figure": fig, "dataframe": df_lst}
 
 
-def _mean_over_months(sub_df, metric, months):
-    """Average a metric over the selected months for one (year, status) subset.
+PLOT_METRICS = ["NDVI", "NDWI_Green", "LST", "ET"]
+PLOT_TITLES = ["NDVI", "NDWI Green", "LST (°C)", "ET (mm)"]
+STATUS_COLORS = {"Dam": "C0", "Non-dam": "C1"}
+ERROR_BAR_NOTE = "Error bars: 95% confidence intervals (t-distribution) across locations."
 
-    Cross-point monthly means are computed first, then averaged with equal weight
-    per month; the 95% CI reflects month-to-month spread within the year.
+
+def _jitter(n, width, seed):
+    """Horizontal offsets for overlaid points. Seeded so figures are reproducible."""
+    return np.random.default_rng(seed).uniform(-width / 2, width / 2, n)
+
+
+def plot_single_year(df_lst, show_points=False):
+    """Plot monthly averages of each metric for dam vs non-dam locations.
+
+    Each month's interval is across locations, matching the multi-year figure.
     """
-    if sub_df.empty or metric not in sub_df.columns:
-        return float("nan"), 0.0
-
-    monthly = sub_df[sub_df["Image_month"].isin(months)].groupby("Image_month")[metric].mean().dropna()
-    if monthly.empty:
-        return float("nan"), 0.0
-
-    n = len(monthly)
-    error = float(1.96 * monthly.std() / math.sqrt(n)) if n > 1 else 0.0
-    return float(monthly.mean()), error
-
-
-def plot_yearly_comparison(df_lst, years, months):
-    """Plot per-year averages of each metric for dam vs non-dam locations"""
     fig, axes = plt.subplots(4, 1, figsize=(12, 18))
-    metrics = ["NDVI", "NDWI_Green", "LST", "ET"]
-    titles = ["NDVI", "NDWI Green", "LST (°C)", "ET (mm)"]
+    statuses = [s for s in STATUS_COLORS if s in set(df_lst["Dam_status"])]
+
+    for ax, metric, title in zip(axes, PLOT_METRICS, PLOT_TITLES):
+        try:
+            sns.lineplot(
+                data=df_lst,
+                x="Image_month",
+                y=metric,
+                hue="Dam_status",
+                style="Dam_status",
+                hue_order=statuses,
+                style_order=statuses,
+                palette=STATUS_COLORS,
+                markers=True,
+                dashes=False,
+                errorbar=t_interval,
+                ax=ax,
+            )
+            if show_points:
+                # Offset the two groups so their points don't overlap.
+                for offset, status in zip((-0.15, 0.15), statuses):
+                    sub = df_lst[df_lst["Dam_status"] == status].dropna(subset=[metric])
+                    x = sub["Image_month"].to_numpy() + offset + _jitter(len(sub), 0.2, seed=0)
+                    ax.scatter(x, sub[metric], s=10, alpha=0.4, color=STATUS_COLORS[status], zorder=1)
+            ax.set_title(f"{title} by Month", fontsize=14)
+            ax.set_xticks(range(1, 13))
+        except ValueError:
+            fig.delaxes(ax)
+            st.warning(f"Unable to create map for {title}.")
+
+    fig.text(0.5, 0.005, ERROR_BAR_NOTE, ha="center", va="bottom", fontsize=10)
+    plt.tight_layout(rect=(0, 0.02, 1, 1))
+    return fig
+
+
+def plot_yearly_comparison(df_lst, years, months, show_points=False):
+    """Plot per-year averages of each metric for dam vs non-dam locations.
+
+    Each location is first averaged over the selected months; bars are the mean of
+    those per-location values and intervals are across locations.
+    """
+    fig, axes = plt.subplots(4, 1, figsize=(12, 18))
     bar_width = 0.35
 
-    for ax, metric, title in zip(axes, metrics, titles):
+    for ax, metric, title in zip(axes, PLOT_METRICS, PLOT_TITLES):
         for offset, status in ((-bar_width / 2, "Dam"), (bar_width / 2, "Non-dam")):
-            means, errors = [], []
-            for year in years:
+            means, lows, highs = [], [], []
+            for i, year in enumerate(years):
                 sub_df = df_lst[(df_lst["Dam_status"] == status) & (df_lst["analysis_year"] == year)]
-                mean, error = _mean_over_months(sub_df, metric, months)
-                means.append(mean)
-                errors.append(error)
+                values = (
+                    location_means(sub_df, metric, months)
+                    if metric in sub_df.columns
+                    else pd.Series(dtype=float)
+                )
+                low, high = t_interval(values)
+                means.append(float(values.mean()) if not values.empty else float("nan"))
+                lows.append(low)
+                highs.append(high)
+
+                if show_points and not values.empty:
+                    x = i + offset + _jitter(len(values), bar_width * 0.6, seed=i)
+                    ax.scatter(x, values, s=12, color="black", alpha=0.5, zorder=3)
+
             ax.bar(
                 [i + offset for i in range(len(years))],
                 means,
                 width=bar_width,
-                yerr=errors,
+                yerr=[np.subtract(means, lows), np.subtract(highs, means)],
                 capsize=4,
                 label=status,
+                color=STATUS_COLORS[status],
             )
         ax.set_title(f"{title} by Year", fontsize=14)
         ax.set_xticks(range(len(years)))
         ax.set_xticklabels([str(year) for year in years])
         ax.legend()
 
-    plt.tight_layout()
+    fig.text(0.5, 0.005, ERROR_BAR_NOTE, ha="center", va="bottom", fontsize=10)
+    plt.tight_layout(rect=(0, 0.02, 1, 1))
     return fig
 
 
@@ -1107,6 +1134,8 @@ def analyze_multiple_years(elevation_dist, years, months, compute_months=None):
         {
             "fig": fig,
             "df_lst": df_lst,
+            "plot_years": analyzed_years,
+            "plot_months": months,
             "visualization_complete": True,
             "analysis_mode": "multi",
             "analysis_label": (
@@ -1294,6 +1323,22 @@ def render_step6():
             coverage_warning = SessionStateManager.get("analysis_coverage_warning")
             if coverage_warning:
                 st.warning(coverage_warning)
+
+            show_points = st.checkbox(
+                "Show individual locations",
+                key="show_location_points",
+                help="Overlays each location's value on the averages.",
+            )
+            if show_points and df_lst is not None:
+                if current_mode == "multi":
+                    fig = plot_yearly_comparison(
+                        df_lst,
+                        SessionStateManager.get("plot_years"),
+                        SessionStateManager.get("plot_months"),
+                        show_points=True,
+                    )
+                else:
+                    fig = plot_single_year(df_lst, show_points=True)
 
             st.pyplot(fig)
 

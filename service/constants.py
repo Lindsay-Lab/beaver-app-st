@@ -70,6 +70,8 @@ class AppConstants:
         "analysis_label": None,
         "df_lst": None,
         "fig": None,
+        "plot_years": None,
+        "plot_months": None,
         # Configuration
         "buffer_radius": DEFAULT_BUFFER_RADIUS,
         # Boolean flags
