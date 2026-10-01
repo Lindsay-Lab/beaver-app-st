@@ -25,7 +25,7 @@ from service.error_handling import (
     is_transient_ee_error,
 )
 from service.load_datasets import load_nhd_collections
-from service.negative_sampling import prepare_hydro, sample_negative_points
+from service.negative_sampling import prepare_hydro, sample_negative_points, sampling_ring, waterways_in_sampling_area
 from service.parser import extract_coordinates_df, upload_non_dam_points_to_ee, upload_points_to_ee, \
     upload_waterway_to_ee
 from service.session_state import SessionStateManager, check_prerequisites, show_prerequisite_error
@@ -509,34 +509,33 @@ def generate_negative_points(inner_radius, outer_radius, sampling_scale):
         )
         return None
 
-    # Get bounds and clip waterway
-    positive_bounds = positive_dams_fc.geometry().bounds()
-    bounds_area = positive_bounds.area(1).getInfo()
+    # One ring - within outer_radius of a dam, minus within inner_radius of any dam -
+    # selects the waterways and bounds the sampling.
+    ring_area = sampling_ring(positive_dams_fc, inner_radius, outer_radius)
+    waterway_fc = waterways_in_sampling_area(SessionStateManager.get("selected_waterway"), ring_area)
+    hydro_raster = prepare_hydro(waterway_fc)
+    negative_points = sample_negative_points(positive_dams_fc, hydro_raster, ring_area, sampling_scale)
 
-    if bounds_area == 0:
-        display_validation_error("No valid dam locations found.")
-        return None
+    # Resolve the waterway count and the samples in a single request, so Earth Engine
+    # builds the ring once (separate requests each rebuild it). Resolving here also
+    # matters on its own: left lazy, the paint -> focal_max -> stratifiedSample chain
+    # is re-evaluated by every consumer, including each map tile request, whose compute
+    # budget is far tighter than a plain getInfo. On larger inputs that surfaces as
+    # "Computation timed out" when drawing the layer. A collection nested in a
+    # dictionary only resolves to its schema, hence toList.
+    resolved = ee.Dictionary(
+        {"waterways": waterway_fc.size(), "samples": negative_points.toList(positive_dams_fc.size())}
+    ).getInfo()
 
-    waterway_fc = SessionStateManager.get("selected_waterway").filterBounds(positive_bounds)
-
-    if waterway_fc.size().getInfo() == 0:
+    if resolved["waterways"] == 0:
         display_validation_error(
-            "No waterway data found within the dam locations area.",
+            f"No waterway data found between {inner_radius} m and {outer_radius} m of the dam locations.",
             ["Check your waterway selection", "Verify dam locations are correct"],
         )
         return None
 
-    # Prepare hydro raster and generate negative points
-    hydro_raster = prepare_hydro(waterway_fc)
-    negative_points = sample_negative_points(positive_dams_fc, hydro_raster, inner_radius, outer_radius, sampling_scale)
-
-    # Resolve the sampling graph once. Left lazy, the paint -> focal_max ->
-    # stratifiedSample chain is re-evaluated by every consumer, including each map
-    # tile request, whose compute budget is far tighter than a plain getInfo. On
-    # larger inputs that surfaces as "Computation timed out" when drawing the layer.
-    sampled = negative_points.getInfo()
-
-    if not sampled.get("features"):
+    sampled_features = resolved["samples"]
+    if not sampled_features:
         display_validation_error(
             "No negative points were generated.",
             ["Try adjusting the radius parameters", "Check that there's sufficient area for sampling"],
@@ -549,7 +548,7 @@ def generate_negative_points(inner_radius, outer_radius, sampling_scale):
     negative_points = ee.FeatureCollection(
         [
             ee.Feature(ee.Geometry.Point(feature["geometry"]["coordinates"]), feature.get("properties") or {})
-            for feature in sampled["features"]
+            for feature in sampled_features
         ]
     )
 

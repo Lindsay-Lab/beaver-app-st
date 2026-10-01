@@ -15,6 +15,27 @@ def deduplicate_locations(orig_set):
     return ee.FeatureCollection(centroids)
 
 
+def sampling_ring(positive_dams, inner_radius, outer_radius):
+    """Area negatives are drawn from: within outer_radius of a dam, but not within inner_radius.
+
+    Both radii are measured from the dams themselves, so the ring for inner 30 m /
+    outer 1000 m spans 30-1000 m from each dam.
+    """
+    inner = positive_dams.map(lambda pt: pt.buffer(inner_radius, 1)).geometry().dissolve(1)
+    outer = positive_dams.map(lambda pt: pt.buffer(outer_radius, 1)).geometry().dissolve(1)
+    return outer.difference(inner, 1)
+
+
+def waterways_in_sampling_area(waterway_fc, ring_area):
+    """Waterways negatives can be drawn from: those crossing the sampling ring.
+
+    Using the ring itself, rather than a box around the dams, keeps every stream within
+    reach. A box around a tight or single-file cluster of dams beside a stream can miss
+    the stream entirely, and a single dam's box has no area at all.
+    """
+    return waterway_fc.filterBounds(ring_area)
+
+
 def prepare_hydro(waterway_fc) -> ee.Image:
     """
     Convert a lines/polygons FeatureCollection (hydro) to a raster image
@@ -31,24 +52,11 @@ def prepare_hydro(waterway_fc) -> ee.Image:
     return hydro_raster
 
 
-def sample_negative_points(positive_dams, hydro_raster, inner_radius, outer_radius, sampling_scale):
+def sample_negative_points(positive_dams, hydro_raster, ring_area, sampling_scale):
     """
-    Create negative points by:
-      1) Buffering positive sites with innerRadius, dissolving them.
-      2) Buffering that dissolved geometry again by outerRadius.
-      3) Taking the difference (outer minus inner).
-      4) Sampling from hydroRaster within that ring, ensuring hydro_mask == 1.
+    Create negative points by sampling hydroRaster where hydro_mask == 1, within
+    ring_area (see sampling_ring) - the same ring used to select the waterways.
     """
-
-    # Buffer each point by innerRadius with error margin
-    inner_buffers = positive_dams.map(lambda pt: pt.buffer(inner_radius, 1))  # Add 1 meter error margin
-    inner_dissolved = inner_buffers.geometry().dissolve(1)  # Add 1 meter error margin
-
-    # Buffer the dissolved geometry by outerRadius with error margin
-    outer_buffer = ee.Feature(inner_dissolved.buffer(outer_radius, 1))  # Add 1 meter error margin
-    # We want just the ring (outer minus inner)
-    ring_area = outer_buffer.geometry().difference(inner_dissolved, 1)  # Add 1 meter error margin
-
     # Clip hydroRaster to that ring
     clipped_hydro = hydro_raster.clip(ring_area)
 

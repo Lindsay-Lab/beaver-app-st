@@ -1,3 +1,4 @@
+import math
 import pytest
 import ee
 import pandas as pd
@@ -17,6 +18,8 @@ from service.validation import (
 from service.negative_sampling import (
     sample_negative_points,
     prepare_hydro,
+    sampling_ring,
+    waterways_in_sampling_area,
 )
 from service.visualize_trends import (
     add_elevation_band,
@@ -161,6 +164,50 @@ def test_prepare_hydro():
     assert 'hydro_mask' in bands
 
 
+def test_waterways_in_sampling_area_finds_stream_outside_dam_bounding_box():
+    """A stream beside a tight cluster of dams is found, though it misses their bounding box.
+
+    Regression: three dams in a north-south line just west of a stream have a bounding
+    box the stream never crosses, so "No waterway data found" was reported even though
+    the stream is well inside the sampling radius.
+    """
+    stream = ee.FeatureCollection([ee.Feature(ee.Geometry.LineString([[-123.0, 44.0], [-123.0, 44.01]]))])
+    dams = ee.FeatureCollection([
+        ee.Feature(ee.Geometry.Point([-123.001, lat])) for lat in (44.004, 44.005, 44.006)
+    ])  # ~80 m west of the stream
+
+    assert stream.filterBounds(dams.geometry().bounds()).size().getInfo() == 0
+    assert waterways_in_sampling_area(stream, sampling_ring(dams, 30, 1000)).size().getInfo() == 1
+
+
+def test_waterways_in_sampling_area_single_dam():
+    """One dam has a zero-area bounding box; its sampling area must still find waterways."""
+    stream = ee.FeatureCollection([ee.Feature(ee.Geometry.LineString([[-123.0, 44.0], [-123.0, 44.01]]))])
+    dams = ee.FeatureCollection([ee.Feature(ee.Geometry.Point([-123.001, 44.005]))])
+    assert waterways_in_sampling_area(stream, sampling_ring(dams, 30, 1000)).size().getInfo() == 1
+
+
+def test_sampling_ring_spans_inner_to_outer_radius_from_each_dam():
+    """The ring is 30-1000 m from the dam, not 30-1030 m (inner radius added twice)."""
+    dam = ee.FeatureCollection([ee.Feature(ee.Geometry.Point([-123.0, 44.0]))])
+    area = sampling_ring(dam, inner_radius=30, outer_radius=1000).area(1).getInfo()
+    expected = math.pi * (1000**2 - 30**2)  # the old ring was ~6% larger
+    assert area == pytest.approx(expected, rel=0.005)
+
+
+def test_waterways_in_sampling_area_uses_outer_radius_from_dam():
+    """A stream 950 m from the dam is used; one 1050 m away is not."""
+    metres_per_degree_lon = 111_320 * math.cos(math.radians(44.0))
+    dam = ee.FeatureCollection([ee.Feature(ee.Geometry.Point([-123.0, 44.0]))])
+
+    def stream_at(metres):
+        lon = -123.0 + metres / metres_per_degree_lon
+        return ee.FeatureCollection([ee.Feature(ee.Geometry.LineString([[lon, 43.99], [lon, 44.01]]))])
+
+    assert waterways_in_sampling_area(stream_at(950), sampling_ring(dam, 30, 1000)).size().getInfo() == 1
+    assert waterways_in_sampling_area(stream_at(1050), sampling_ring(dam, 30, 1000)).size().getInfo() == 0
+
+
 def test_sample_negative_points():
     """Test sample_negative_points function"""
     positive_fc = ee.FeatureCollection([
@@ -177,8 +224,7 @@ def test_sample_negative_points():
     negative_fc = sample_negative_points(
         positive_fc,
         hydro_raster,
-        inner_radius=300,
-        outer_radius=500,
+        ring_area=sampling_ring(positive_fc, inner_radius=300, outer_radius=500),
         sampling_scale=10
     )
 
@@ -389,5 +435,5 @@ def test_end_to_end_small_dataset(mock_streamlit):
 
     # Generate negatives
     hydro_raster = prepare_hydro(waterway)
-    negatives = sample_negative_points(dam_fc, hydro_raster, 300, 500, 10)
+    negatives = sample_negative_points(dam_fc, hydro_raster, sampling_ring(dam_fc, 300, 500), 10)
     assert negatives.size().getInfo() > 0
