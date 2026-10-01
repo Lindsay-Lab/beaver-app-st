@@ -37,14 +37,10 @@ class AppConstants:
     MAX_RETRIES = 3
     RETRY_BACKOFF_SECONDS = 2
 
-    # Measured cost of one location for one year through the full
-    # Sentinel-2 + Landsat + OpenET pipeline. Used only to warn users about runtime
-    # before they start; Earth Engine timings vary widely, so treat it as a rough guide.
-    SECONDS_PER_POINT_YEAR = 20
-
-    # Beyond roughly this much work, a Streamlit session is unlikely to stay connected
-    # long enough to finish, and results are lost when it drops.
-    RUNTIME_WARNING_MINUTES = 20
+    # Locations x years beyond which we warn that a run is large. Past roughly this
+    # much work, a Streamlit session may not stay connected long enough to finish,
+    # and results are lost when it drops.
+    LARGE_RUN_POINT_YEARS = 60
 
     # UI settings
     MAP_WIDTH = 800

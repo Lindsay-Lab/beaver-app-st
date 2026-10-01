@@ -722,7 +722,7 @@ def create_buffers(buffer_radius):
 
     dam_data = buffer_merged_points(merged_collection, buffer_radius)
 
-    # Clear the cached point count so the Step 6 runtime estimate reflects the new buffers.
+    # Clear the cached point count so the Step 6 large-run warning reflects the new buffers.
     SessionStateManager.set_multiple(
         {"Dam_data": dam_data, "buffers_created": True, "analysis_point_count": None}
     )
@@ -1155,42 +1155,29 @@ def create_export_dataframe(df, include_coordinates=True):
     return export_df
 
 
-def estimate_runtime_minutes(n_points, n_years=1):
-    """Rough wall-clock estimate for an analysis run, in minutes.
-
-    Constants are read with getattr defaults: Streamlit can reload this module while
-    keeping an older ``service.constants`` in sys.modules, and a missing attribute here
-    must not be able to take down the page.
-    """
-    seconds_each = getattr(AppConstants, "SECONDS_PER_POINT_YEAR", 20)
-    return (n_points * n_years * seconds_each) / 60.0
-
-
-def show_runtime_estimate(n_points, n_years=1):
-    """Warn about long runs before they start.
+def show_large_run_warning(n_points, n_years=1):
+    """Warn about large runs before they start.
 
     A large analysis can exceed how long a Streamlit session stays connected: the run
     is synchronous, so if the browser disconnects the results are lost with no error.
-    Telling users the cost up front is the difference between an informed choice and
-    an hour of apparent silence.
+    No time estimate is shown: Earth Engine throughput varies too much for one to be
+    reliable, and numbers that don't match reality confuse users.
     """
     if not n_points:
         return
 
     # This is advisory only - never let it interrupt the analysis it describes.
     try:
-        minutes = estimate_runtime_minutes(n_points, n_years)
-        scope = f"{n_points} locations" + (f" x {n_years} years" if n_years > 1 else "")
-        threshold = getattr(AppConstants, "RUNTIME_WARNING_MINUTES", 20)
-
-        if minutes < threshold:
-            st.caption(f"Estimated runtime: about {minutes:.0f} minute(s) for {scope}.")
+        # getattr default: Streamlit can reload this module while keeping an older
+        # ``service.constants`` in sys.modules, and a missing attribute must not take
+        # down the page.
+        threshold = getattr(AppConstants, "LARGE_RUN_POINT_YEARS", 60)
+        if n_points * n_years < threshold:
             return
 
-        hours = minutes / 60.0
-        pretty = f"{minutes:.0f} minutes" if minutes < 90 else f"{hours:.1f} hours"
+        scope = f"{n_points} locations" + (f" x {n_years} years" if n_years > 1 else "")
         st.warning(
-            f"This run covers {scope} and is estimated to take about {pretty}. "
+            f"This is a large run ({scope}) and may take a long time. "
             "The analysis runs live in your browser session, so if the connection drops "
             "before it finishes the results are lost without an error message. For runs "
             "this large, analyze fewer locations (or fewer years) at a time and combine "
@@ -1224,7 +1211,7 @@ def render_step6():
     stored_mode = SessionStateManager.get("analysis_mode")
     has_results = SessionStateManager.get("visualization_complete", False) and stored_mode == current_mode
 
-    # Point count drives the runtime estimate. Cached because it costs a round-trip.
+    # Point count drives the large-run warning. Cached because it costs a round-trip.
     n_points = SessionStateManager.get("analysis_point_count")
     if n_points is None:
         dam_data = SessionStateManager.get_dam_data()
@@ -1251,7 +1238,7 @@ def render_step6():
             "Each selected year is analyzed separately, so this takes roughly as long as "
             "the single-year analysis multiplied by the number of years."
         )
-        show_runtime_estimate(n_points, max(1, len(years)))
+        show_large_run_warning(n_points, max(1, len(years)))
 
         if st.button("Analyze Across Years"):
             if len(years) < 2:
@@ -1266,7 +1253,7 @@ def render_step6():
                         has_results = True
 
     elif not has_results:
-        show_runtime_estimate(n_points)
+        show_large_run_warning(n_points)
         if st.button("Analyze Combined Effects"):
             with safe_processing("Analyzing combined effects"):
                 result = analyze_combined_effects(elevation_dist)
