@@ -55,8 +55,9 @@ def main():
     """Main application function"""
     st.title("Analyzing the Impact of Beaver Dams")
     st.warning(
-        "Please note that the Evapotranspiration data is not available for the eastern half of the US "
-        "or for certain years. Learn more on the OpenET website: [Link](https://etdata.org/)."
+        "Please note that Evapotranspiration (ET) data from OpenET covers the contiguous US only "
+        "(not Alaska or Hawaii), and the most recent months may not be published yet. "
+        "Learn more on the OpenET website: [Link](https://etdata.org/)."
     )
 
     # Render each step in expandable sections
@@ -851,7 +852,8 @@ def describe_month_gaps(df, months, label=None):
         )
     if no_et:
         parts.append(
-            f"No ET data{scope}: OpenET covers the contiguous US only, through December 2024."
+            f"No ET data{scope}: OpenET covers the contiguous US only, and the most recent "
+            "months may not be published yet."
         )
     return " ".join(parts) or None
 
@@ -1340,8 +1342,8 @@ def render_step6():
             key="multi_year_months",
         )
 
-        if any(year < 2020 for year in years):
-            st.warning("You may proceed, but ET data may not be available for some selected years.")
+        if any(year >= datetime.date.today().year for year in years):
+            st.warning("You may proceed, but ET for the most recent months may not be published yet.")
 
         # Only meaningful when some months are deselected.
         include_all_months = 0 < len(months) < 12 and st.checkbox(

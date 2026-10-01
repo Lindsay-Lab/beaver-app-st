@@ -302,8 +302,8 @@ def display_year_selector_with_warning(widget_prefix, suffix=""):
     )
     selected_date = f"{selected_year}-07-01"
 
-    if selected_year < 2020 or selected_year > 2025:
-        st.warning("You may proceed to next steps, but ET data may not be available for the selected year.")
+    if selected_year >= datetime.date.today().year:
+        st.warning("You may proceed to next steps, but ET for the most recent months may not be published yet.")
 
     return selected_date
 
