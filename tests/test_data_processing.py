@@ -270,6 +270,29 @@ def test_s2_export_for_visual():
     assert size > 0  # Should have some images
 
 
+def test_s2_export_for_visual_months():
+    """Only the requested months are computed; omitting months computes all 12"""
+    dam_fc = ee.FeatureCollection([
+        ee.Feature(
+            ee.Geometry.Point([-123.0, 44.05]).buffer(150),
+            {
+                "Dam": "positive",
+                "Survey_Date": "2020-07-01",
+                "id_property": "P1",
+                "Point_geo": ee.Geometry.Point([-123.0, 44.05])
+            }
+        )
+    ])
+
+    subset = s2_export_for_visual(
+        dam_fc, add_elevation_band, AppConstants.DEFAULT_ELEVATION_DISTANCE, months=[6, 7]
+    )
+    assert sorted(subset.aggregate_array("Image_month").getInfo()) == [6, 7]
+
+    full = s2_export_for_visual(dam_fc, add_elevation_band, AppConstants.DEFAULT_ELEVATION_DISTANCE)
+    assert full.size().getInfo() == 12
+
+
 def test_add_landsat_lst_et():
     """Test add_landsat_lst_et adds LST and ET bands"""
     # Create a simple S2 image with required properties

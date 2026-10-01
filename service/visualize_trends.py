@@ -63,11 +63,14 @@ def apply_cloud_mask(image):
     return image.updateMask(cloud_mask).select(["S2_Blue", "S2_Green", "S2_Red", "S2_NIR"])
 
 
-def get_monthly_median(collection):
+def get_monthly_median(collection, months=None):
     """
     Get the median of the images from each month
+
+    ``months`` limits which calendar months are computed (default: all 12). Each month
+    only uses its own imagery, so skipping months doesn't change the others' values.
     """
-    months = ee.List.sequence(1, 12)
+    months = ee.List(list(months)) if months else ee.List.sequence(1, 12)
 
     def get_month_image(month):
         monthly_images = collection.filter(ee.Filter.calendarRange(month, month, "month"))
@@ -129,7 +132,7 @@ def add_elevation_band(image, elev_dist):
     return full_image2
 
 
-def s2_export_for_visual(dam_collection, elevation_function, elevation_dist=None) -> ee.ImageCollection:
+def s2_export_for_visual(dam_collection, elevation_function, elevation_dist=None, months=None) -> ee.ImageCollection:
     """Apply the required transformations and filtration to the images"""
 
     def extract_pixels(box):
@@ -149,7 +152,7 @@ def s2_export_for_visual(dam_collection, elevation_function, elevation_dist=None
         s2_named_bands = rename_bands(s2_cloud_band)
         s2_cloud_masked = s2_named_bands.map(apply_cloud_mask)
         s2_cloud_filter = s2_cloud_masked.map(add_acquisition_date)
-        filtered_collection_bands = get_monthly_median(s2_cloud_filter)
+        filtered_collection_bands = get_monthly_median(s2_cloud_filter, months)
 
         # Set metadata to each image
         filtered_collection_bands = filtered_collection_bands.map(

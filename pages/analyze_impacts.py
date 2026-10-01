@@ -813,7 +813,7 @@ def describe_incomplete_coverage(coverage, label=None):
     )
 
 
-def compute_metrics_df(dam_data, elevation_dist, checkpoint_key=None):
+def compute_metrics_df(dam_data, elevation_dist, checkpoint_key=None, months=None):
     """Run the batched metric pipeline over buffered points and return a DataFrame.
 
     Completed batches are checkpointed into session state under ``checkpoint_key``. A
@@ -835,12 +835,15 @@ def compute_metrics_df(dam_data, elevation_dist, checkpoint_key=None):
     num_batches = (total_count + batch_size - 1) // batch_size
 
     # Checkpoints are keyed by the run's parameters, so changing the points, the
-    # elevation distance or the batch size starts a fresh set rather than mixing
-    # results from different analyses.
+    # elevation distance, the months or the batch size starts a fresh set rather than
+    # mixing results from different analyses.
     store_key = None
     completed = {}
     if checkpoint_key is not None:
-        store_key = f"batch_checkpoint::{checkpoint_key}::{total_count}::{elevation_dist}::{batch_size}"
+        months_tag = ",".join(str(m) for m in sorted(months)) if months else "all"
+        store_key = (
+            f"batch_checkpoint::{checkpoint_key}::{total_count}::{elevation_dist}::{months_tag}::{batch_size}"
+        )
         completed = dict(SessionStateManager.get(store_key) or {})
 
     progress_bar = st.progress(0)
@@ -872,7 +875,7 @@ def compute_metrics_df(dam_data, elevation_dist, checkpoint_key=None):
             try:
                 # Process batch through pipeline
                 s2_cloud_mask_batch = ee.ImageCollection(
-                    s2_export_for_visual(dam_batch_fc, add_elevation_band, elevation_dist)
+                    s2_export_for_visual(dam_batch_fc, add_elevation_band, elevation_dist, months)
                 )
                 s2_image_collection_batch = ee.ImageCollection(s2_cloud_mask_batch)
                 s2_with_lst_batch = s2_image_collection_batch.map(add_landsat_lst_et)
@@ -1045,8 +1048,12 @@ def plot_yearly_comparison(df_lst, years, months):
 
 
 @handle_processing_errors("multi-year analysis")
-def analyze_multiple_years(elevation_dist, years, months):
-    """Run the combined analysis once per year and compare yearly averages"""
+def analyze_multiple_years(elevation_dist, years, months, compute_months=None):
+    """Run the combined analysis once per year and compare yearly averages.
+
+    ``months`` are the months averaged in the figure; ``compute_months`` are the months
+    computed in Earth Engine (None for all 12, e.g. so the CSV has the full year).
+    """
     merged_collection = SessionStateManager.get("Merged_collection")
     if not merged_collection:
         display_validation_error("No merged data found. Please complete Step 4 first.")
@@ -1065,7 +1072,9 @@ def analyze_multiple_years(elevation_dist, years, months):
         dated_collection = merged_collection.map(lambda feature, date=full_date: feature.set("date", date))
         dam_data = buffer_merged_points(dated_collection, buffer_radius)
 
-        df_year, coverage = compute_metrics_df(dam_data, elevation_dist, checkpoint_key=f"year-{year}")
+        df_year, coverage = compute_metrics_df(
+            dam_data, elevation_dist, checkpoint_key=f"year-{year}", months=compute_months
+        )
         if df_year is None or df_year.empty:
             st.warning(f"No data could be processed for {year}.")
             coverage_notes.append(f"{year}: no data could be processed (year omitted entirely)")
@@ -1155,7 +1164,7 @@ def create_export_dataframe(df, include_coordinates=True):
     return export_df
 
 
-def show_large_run_warning(n_points, n_years=1):
+def show_large_run_warning(n_points, n_years=1, n_months=12):
     """Warn about large runs before they start.
 
     A large analysis can exceed how long a Streamlit session stays connected: the run
@@ -1171,16 +1180,18 @@ def show_large_run_warning(n_points, n_years=1):
         # getattr default: Streamlit can reload this module while keeping an older
         # ``service.constants`` in sys.modules, and a missing attribute must not take
         # down the page.
-        threshold = getattr(AppConstants, "LARGE_RUN_POINT_YEARS", 60)
-        if n_points * n_years < threshold:
+        threshold = getattr(AppConstants, "LARGE_RUN_POINT_MONTHS", 720)
+        if n_points * n_years * n_months < threshold:
             return
 
         scope = f"{n_points} locations" + (f" x {n_years} years" if n_years > 1 else "")
+        if n_months < 12:
+            scope += f" x {n_months} months"
         st.warning(
             f"This is a large run ({scope}) and may take a long time. "
             "The analysis runs live in your browser session, so if the connection drops "
             "before it finishes the results are lost without an error message. For runs "
-            "this large, analyze fewer locations (or fewer years) at a time and combine "
+            "this large, analyze fewer locations, years or months at a time and combine "
             "the downloaded CSVs afterwards."
         )
     except Exception:  # pylint: disable=broad-except
@@ -1234,11 +1245,17 @@ def render_step6():
         if any(year < 2020 for year in years):
             st.warning("You may proceed, but ET data may not be available for some selected years.")
 
-        st.caption(
-            "Each selected year is analyzed separately, so this takes roughly as long as "
-            "the single-year analysis multiplied by the number of years."
+        # Only meaningful when some months are deselected.
+        include_all_months = 0 < len(months) < 12 and st.checkbox(
+            "Include all 12 months in CSV",
+            key="multi_year_all_months",
+            help="Analyzes unselected months too. Increases run time.",
         )
-        show_large_run_warning(n_points, max(1, len(years)))
+        # Only selected months are computed unless the full year is wanted in the CSV.
+        compute_months = None if include_all_months else sorted(months)
+
+        st.caption("Run time grows with the number of locations, years and months analyzed.")
+        show_large_run_warning(n_points, max(1, len(years)), 12 if include_all_months else len(months))
 
         if st.button("Analyze Across Years"):
             if len(years) < 2:
@@ -1247,7 +1264,7 @@ def render_step6():
                 st.warning("Please select at least one month.")
             else:
                 with safe_processing("Analyzing across years"):
-                    result = analyze_multiple_years(elevation_dist, sorted(years), sorted(months))
+                    result = analyze_multiple_years(elevation_dist, sorted(years), sorted(months), compute_months)
                     if result:
                         display_success_message("Multi-year analysis complete!")
                         has_results = True

@@ -37,10 +37,11 @@ class AppConstants:
     MAX_RETRIES = 3
     RETRY_BACKOFF_SECONDS = 2
 
-    # Locations x years beyond which we warn that a run is large. Past roughly this
-    # much work, a Streamlit session may not stay connected long enough to finish,
-    # and results are lost when it drops.
-    LARGE_RUN_POINT_YEARS = 60
+    # Locations x years x months computed beyond which we warn that a run is large
+    # (720 = 60 location-years of full-year data). Past roughly this much work, a
+    # Streamlit session may not stay connected long enough to finish, and results are
+    # lost when it drops.
+    LARGE_RUN_POINT_MONTHS = 720
 
     # UI settings
     MAP_WIDTH = 800
