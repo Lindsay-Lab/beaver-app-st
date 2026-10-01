@@ -69,6 +69,10 @@ def get_monthly_median(collection, months=None):
 
     ``months`` limits which calendar months are computed (default: all 12). Each month
     only uses its own imagery, so skipping months doesn't change the others' values.
+
+    Months with no images are dropped. Sentinel-2 has none in high-latitude winter
+    (e.g. January and December in western Alaska), and taking the date of a missing
+    first image would fail the whole request.
     """
     months = ee.List(list(months)) if months else ee.List.sequence(1, 12)
 
@@ -79,9 +83,10 @@ def get_monthly_median(collection, months=None):
         image_month = image_date.get("month")
         image_year = image_date.get("year")
         median = monthly_images.median().set("Image_month", image_month).set("Image_year", image_year)
-        return ee.Image(median)
+        # Lazy: the date lookup above is only evaluated for months that have images.
+        return ee.Algorithms.If(monthly_images.size().gt(0), median, None)
 
-    monthly_images_list = months.map(get_month_image)
+    monthly_images_list = months.map(get_month_image, True)  # dropNulls
     monthly_images_collection = ee.ImageCollection.fromImages(monthly_images_list)
     return monthly_images_collection
 

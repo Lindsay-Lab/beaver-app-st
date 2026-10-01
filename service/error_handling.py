@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from functools import wraps
 from typing import Callable, Any, Optional
 
+import ee
 import streamlit as st
 
 
@@ -140,3 +141,29 @@ def handle_file_processing_error(filename: str, error: Exception):
     else:
         st.error(f"Error processing file '{filename}': {str(error)}")
         _display_technical_details(traceback.format_exc())
+
+# Earth Engine messages for failures that usually succeed on retry. Anything else from
+# Earth Engine (a missing band, a null value) fails the same way every time.
+_TRANSIENT_EE_MESSAGES = (
+    "timed out",
+    "timeout",
+    "deadline",
+    "too many",
+    "rate limit",
+    "quota",
+    "internal error",
+    "backend error",
+    "service unavailable",
+)
+
+
+def is_transient_ee_error(error: Exception) -> bool:
+    """Whether an error from an Earth Engine request is worth retrying.
+
+    Non-Earth Engine errors (dropped connections, socket timeouts) are treated as
+    transient; Earth Engine errors only when the message matches a known transient one.
+    """
+    if not isinstance(error, ee.EEException):
+        return True
+    message = str(error).lower()
+    return any(fragment in message for fragment in _TRANSIENT_EE_MESSAGES)

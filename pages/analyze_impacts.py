@@ -1,5 +1,6 @@
 """Primary page for analyzing dam impacts"""
 
+import calendar
 import datetime
 import io
 import time
@@ -21,13 +22,14 @@ from service.error_handling import (
     display_success_message,
     display_warning_with_options,
     handle_file_processing_error, safe_expander,
+    is_transient_ee_error,
 )
 from service.load_datasets import load_nhd_collections
 from service.negative_sampling import prepare_hydro, sample_negative_points
 from service.parser import extract_coordinates_df, upload_non_dam_points_to_ee, upload_points_to_ee, \
     upload_waterway_to_ee
 from service.session_state import SessionStateManager, check_prerequisites, show_prerequisite_error
-from service.statistics import location_means, t_interval
+from service.statistics import location_means, missing_months_by_metric, t_interval
 from service.validation import (
     check_waterway_intersection,
     generate_validation_report,
@@ -809,9 +811,49 @@ def describe_incomplete_coverage(coverage, label=None):
     return (
         f"Incomplete results{scope}: {analyzed} of {expected} locations were analyzed "
         f"({missing} missing, from {len(failed)} of {coverage.get('num_batches', 0)} "
-        "batches that failed after retries). The figures and CSV below are based only on "
+        "batches that failed). The figures and CSV below are based only on "
         "the locations that processed successfully. Re-run the analysis to try again."
     )
+
+
+def _format_months(months):
+    return ", ".join(calendar.month_abbr[m] for m in months)
+
+
+def describe_month_gaps(df, months, label=None):
+    """Return a user-facing note on months with no data for some locations, or None.
+
+    Satellite coverage has seasonal gaps - Sentinel-2 has no high-latitude winter
+    imagery, and Landsat-based LST is often missing in snowy or dark months - so a
+    yearly average can silently cover a different season per metric. OpenET has no
+    data at all outside the contiguous US.
+    """
+    if df is None or df.empty:
+        return None
+
+    gaps = missing_months_by_metric(df, months, PLOT_METRICS)
+    no_et = "ET" not in df.columns or df["ET"].isna().all()
+    if no_et:
+        gaps.pop("ET", None)
+
+    # Group metrics that share the same missing months to keep the note short.
+    by_months = {}
+    for metric, missing in gaps.items():
+        by_months.setdefault(tuple(missing), []).append(PLOT_TITLES[PLOT_METRICS.index(metric)])
+
+    parts = []
+    scope = f" for {label}" if label else ""
+    if by_months:
+        listed = "; ".join(f"{', '.join(titles)} in {_format_months(m)}" for m, titles in by_months.items())
+        parts.append(
+            f"Missing months{scope}: some locations have no data for {listed}. Averages use only "
+            "the months with data, so different metrics or locations may cover different seasons."
+        )
+    if no_et:
+        parts.append(
+            f"No ET data{scope}: OpenET covers the contiguous US only, through December 2024."
+        )
+    return " ".join(parts) or None
 
 
 def compute_metrics_df(dam_data, elevation_dist, checkpoint_key=None, months=None):
@@ -894,13 +936,20 @@ def compute_metrics_df(dam_data, elevation_dist, checkpoint_key=None, months=Non
                 break
             except Exception as e:  # pylint: disable=broad-except
                 last_error = e
+                # A data error fails identically every time, so retrying only wastes time.
+                if not is_transient_ee_error(e):
+                    break
                 if attempt < AppConstants.MAX_RETRIES - 1:
                     st.write(f"  Batch {i + 1} failed ({e}); retrying...")
                     time.sleep(AppConstants.RETRY_BACKOFF_SECONDS * (attempt + 1))
 
         if last_error is not None:
             failed_batches.append(i + 1)
-            st.warning(f"Error processing batch {i + 1} after {AppConstants.MAX_RETRIES} attempts: {last_error}")
+            attempts = attempt + 1
+            st.warning(
+                f"Error processing batch {i + 1} after {attempts} attempt{'s' if attempts > 1 else ''}: "
+                f"{last_error}"
+            )
 
         progress_bar.progress((i + 1) / num_batches)
 
@@ -954,7 +1003,9 @@ def analyze_combined_effects(elevation_dist):
     if df_lst is None:
         return None
 
-    SessionStateManager.set("analysis_coverage_warning", describe_incomplete_coverage(coverage))
+    notes = [describe_incomplete_coverage(coverage), describe_month_gaps(df_lst, range(1, 13))]
+    notes = [n for n in notes if n]
+    SessionStateManager.set("analysis_coverage_warning", "\n\n".join(notes) or None)
 
     fig = plot_single_year(df_lst)
 
@@ -981,6 +1032,13 @@ STATUS_COLORS = {"Dam": "C0", "Non-dam": "C1"}
 ERROR_BAR_NOTE = "Error bars: 95% confidence intervals (t-distribution) across locations."
 
 
+def _mark_no_data(ax, title):
+    ax.set_title(title, fontsize=14)
+    ax.text(0.5, 0.5, "No data for these locations", ha="center", va="center", transform=ax.transAxes)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
 def _jitter(n, width, seed):
     """Horizontal offsets for overlaid points. Seeded so figures are reproducible."""
     return np.random.default_rng(seed).uniform(-width / 2, width / 2, n)
@@ -995,6 +1053,9 @@ def plot_single_year(df_lst, show_points=False):
     statuses = [s for s in STATUS_COLORS if s in set(df_lst["Dam_status"])]
 
     for ax, metric, title in zip(axes, PLOT_METRICS, PLOT_TITLES):
+        if metric not in df_lst.columns or df_lst[metric].isna().all():
+            _mark_no_data(ax, f"{title} by Month")
+            continue
         try:
             sns.lineplot(
                 data=df_lst,
@@ -1037,6 +1098,9 @@ def plot_yearly_comparison(df_lst, years, months, show_points=False):
     bar_width = 0.35
 
     for ax, metric, title in zip(axes, PLOT_METRICS, PLOT_TITLES):
+        if metric not in df_lst.columns or df_lst[metric].isna().all():
+            _mark_no_data(ax, f"{title} by Year")
+            continue
         for offset, status in ((-bar_width / 2, "Dam"), (bar_width / 2, "Non-dam")):
             means, lows, highs = [], [], []
             for i, year in enumerate(years):
@@ -1090,6 +1154,7 @@ def analyze_multiple_years(elevation_dist, years, months, compute_months=None):
 
     year_dfs = []
     coverage_notes = []
+    gap_notes = {}  # note text -> years it applies to
     for year in years:
         st.write(f"Analyzing year {year}")
 
@@ -1110,6 +1175,7 @@ def analyze_multiple_years(elevation_dist, years, months, compute_months=None):
         note = describe_incomplete_coverage(coverage, label=str(year))
         if note:
             coverage_notes.append(note)
+        gap_notes.setdefault(describe_month_gaps(df_year, months), []).append(str(year))
 
         # Copy before tagging: never mutate a frame the caller may still hold a
         # reference to, which would let one year's tag overwrite another's.
@@ -1121,6 +1187,9 @@ def analyze_multiple_years(elevation_dist, years, months, compute_months=None):
         display_validation_error("No data could be processed for any selected year.")
         return None
 
+    for note, note_years in gap_notes.items():
+        if note:
+            coverage_notes.append(f"{', '.join(note_years)}: {note}")
     SessionStateManager.set(
         "analysis_coverage_warning", "\n\n".join(coverage_notes) if coverage_notes else None
     )

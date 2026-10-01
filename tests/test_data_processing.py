@@ -293,6 +293,25 @@ def test_s2_export_for_visual_months():
     assert full.size().getInfo() == 12
 
 
+def test_s2_export_for_visual_skips_months_without_imagery():
+    """Months with no Sentinel-2 images are dropped instead of failing the whole run.
+
+    Regression: on the Seward Peninsula, Alaska, there is no Sentinel-2 imagery in
+    January or December, which used to fail every batch with "Element.get: Parameter
+    'object' is required and may not be null".
+    """
+    point = ee.Geometry.Point([-164.8, 65.19])
+    dam_fc = ee.FeatureCollection([
+        ee.Feature(
+            point.buffer(150),
+            {"Dam": "positive", "Survey_Date": "2020-07-01", "id_property": "AK1", "Point_geo": point},
+        )
+    ])
+
+    ic = s2_export_for_visual(dam_fc, add_elevation_band, AppConstants.DEFAULT_ELEVATION_DISTANCE)
+    assert sorted(ic.aggregate_array("Image_month").getInfo()) == list(range(2, 12))
+
+
 def test_add_landsat_lst_et():
     """Test add_landsat_lst_et adds LST and ET bands"""
     # Create a simple S2 image with required properties
