@@ -97,11 +97,8 @@ def process_dam_upload(uploaded_file):
     """Process uploaded dam location file"""
     feature_collection = upload_points_to_ee(uploaded_file, widget_prefix="Dam")
     if feature_collection:
-        if feature_collection.size().getInfo() < 2:
-            st.warning(
-                "Please upload more than one dam location — the comparative analysis "
-                "needs at least two."
-            )
+        if feature_collection.size().getInfo() == 0:
+            st.warning("No dam locations were found in the uploaded file.")
             return None
         SessionStateManager.set_multiple(
             {
@@ -1031,6 +1028,12 @@ PLOT_METRICS = ["NDVI", "NDWI_Green", "LST", "ET"]
 PLOT_TITLES = ["NDVI", "NDWI Green", "LST (°C)", "ET (mm)"]
 STATUS_COLORS = {"Dam": "C0", "Non-dam": "C1"}
 ERROR_BAR_NOTE = "Error bars: 95% confidence intervals (t-distribution) across locations."
+SMALL_GROUP_NOTE = " Groups with fewer than 2 locations have no error bar."
+
+
+def _add_error_bar_note(fig, has_single_location_groups):
+    note = ERROR_BAR_NOTE + (SMALL_GROUP_NOTE if has_single_location_groups else "")
+    fig.text(0.5, 0.005, note, ha="center", va="bottom", fontsize=10)
 
 
 def _mark_no_data(ax, title):
@@ -1084,7 +1087,13 @@ def plot_single_year(df_lst, show_points=False):
             fig.delaxes(ax)
             st.warning(f"Unable to create map for {title}.")
 
-    fig.text(0.5, 0.005, ERROR_BAR_NOTE, ha="center", va="bottom", fontsize=10)
+    # A group with exactly one value is drawn as a point with no interval around it.
+    single_location_groups = any(
+        df_lst.groupby(["Dam_status", "Image_month"])[metric].count().eq(1).any()
+        for metric in PLOT_METRICS
+        if metric in df_lst.columns
+    )
+    _add_error_bar_note(fig, single_location_groups)
     plt.tight_layout(rect=(0, 0.02, 1, 1))
     return fig
 
@@ -1097,6 +1106,7 @@ def plot_yearly_comparison(df_lst, years, months, show_points=False):
     """
     fig, axes = plt.subplots(4, 1, figsize=(12, 18))
     bar_width = 0.35
+    single_location_groups = False
 
     for ax, metric, title in zip(axes, PLOT_METRICS, PLOT_TITLES):
         if metric not in df_lst.columns or df_lst[metric].isna().all():
@@ -1112,6 +1122,7 @@ def plot_yearly_comparison(df_lst, years, months, show_points=False):
                     else pd.Series(dtype=float)
                 )
                 low, high = t_interval(values)
+                single_location_groups |= len(values) == 1
                 means.append(float(values.mean()) if not values.empty else float("nan"))
                 lows.append(low)
                 highs.append(high)
@@ -1134,7 +1145,7 @@ def plot_yearly_comparison(df_lst, years, months, show_points=False):
         ax.set_xticklabels([str(year) for year in years])
         ax.legend()
 
-    fig.text(0.5, 0.005, ERROR_BAR_NOTE, ha="center", va="bottom", fontsize=10)
+    _add_error_bar_note(fig, single_location_groups)
     plt.tight_layout(rect=(0, 0.02, 1, 1))
     return fig
 

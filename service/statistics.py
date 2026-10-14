@@ -13,19 +13,17 @@ from scipy import stats
 def t_interval(values, confidence=0.95):
     """Confidence interval for the mean of ``values`` using the t-distribution.
 
-    Returns (low, high). NaNs are ignored; a single value gives a zero-width interval
-    and no values give (nan, nan).
+    Returns (low, high). NaNs are ignored. Fewer than two values give (nan, nan): one
+    location says nothing about the spread between locations, so the interval is
+    undefined - drawing it as zero-width would look perfectly precise instead.
     """
     arr = np.asarray(values, dtype=float)
     arr = arr[~np.isnan(arr)]
     n = arr.size
-    if n == 0:
+    if n < 2:
         return float("nan"), float("nan")
 
     mean = float(arr.mean())
-    if n == 1:
-        return mean, mean
-
     half = stats.t.ppf((1 + confidence) / 2, df=n - 1) * arr.std(ddof=1) / math.sqrt(n)
     return mean - float(half), mean + float(half)
 

@@ -18,8 +18,10 @@ def test_t_interval_ignores_nan():
     assert t_interval([1, 2, 3, 4, 5, float("nan")]) == pytest.approx(t_interval([1, 2, 3, 4, 5]))
 
 
-def test_t_interval_single_value_has_no_width():
-    assert t_interval([2.5]) == (2.5, 2.5)
+def test_t_interval_single_value_is_undefined():
+    # One location says nothing about spread between locations, so no interval.
+    low, high = t_interval([2.5])
+    assert math.isnan(low) and math.isnan(high)
 
 
 def test_t_interval_empty_is_nan():
