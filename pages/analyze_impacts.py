@@ -43,6 +43,8 @@ from service.visualize_trends import (
     add_landsat_lst_et,
     compute_all_metrics_lst_et,
     add_elevation_band,
+    add_whole_buffer_band,
+    locations_without_elevation,
 )
 
 
@@ -147,13 +149,16 @@ def load_waterway_data():
     states_dataset = ee.FeatureCollection("TIGER/2018/States")
     states_with_dams = states_dataset.filterBounds(positive_dam_bounds)
 
-    SessionStateManager.set("Positive_dam_state", states_with_dams)
     state_names = states_with_dams.aggregate_array("NAME").getInfo()
 
     if not state_names:
         display_validation_error(
-            "No states found within the dam data bounds.",
-            ["Check that your dam coordinates are valid", "Ensure coordinates are in the correct format"],
+            "No US states found within the dam data bounds, so the NHD waterway map can't be loaded.",
+            [
+                "Check that your dam coordinates are valid and in the correct format",
+                "Outside the US, use the alternative waterway map below, or upload your own "
+                "non-dam locations without a waterway map (checkbox above)",
+            ],
         )
         return None
 
@@ -213,12 +218,32 @@ def render_alternative_waterway_options():
         if st.button("Load Alternative Map"):
             with safe_processing("Loading alternative dataset"):
                 if dataset_option == "WWF Free Flowing Rivers":
-                    states_with_dams = SessionStateManager.get("Positive_dam_state")
+                    # Not limited to the US states around the dams, so it also works
+                    # elsewhere. Validation and negative sampling each select the rivers
+                    # near the dams themselves.
                     wwf_dataset = ee.FeatureCollection("WWF/HydroSHEDS/v1/FreeFlowingRivers")
-                    clipped_wwf = wwf_dataset.filterBounds(states_with_dams)
-                    SessionStateManager.set("selected_waterway", clipped_wwf)
+                    SessionStateManager.set("selected_waterway", wwf_dataset)
                     SessionStateManager.complete_step(2)
                     display_success_message("WWF dataset successfully loaded.")
+
+
+def skip_waterway_steps():
+    """Complete Steps 2 and 3 without a waterway map, keeping every dam.
+
+    Validation measures each dam's distance to the waterway map, so it can't run without
+    one; Step 4 then only offers uploading non-dam locations.
+    """
+    SessionStateManager.set_multiple(
+        {
+            "validation_complete": True,
+            "use_all_dams": True,
+            "Dam_data": SessionStateManager.get("Full_positive"),
+            "show_non_dam_section": True,
+            "validation_step": "completed",
+        }
+    )
+    SessionStateManager.complete_step(2)
+    SessionStateManager.complete_step(3)
 
 
 def render_step2():
@@ -228,6 +253,20 @@ def render_step2():
     # Check prerequisites
     if not check_prerequisites([1]):
         show_prerequisite_error("Step 2", [1])
+        return
+
+    no_waterway = st.checkbox(
+        "Use no waterway map and upload non-dam locations",
+        key="no_waterway",
+        # Switching modes invalidates any validation or non-dam points from the other mode.
+        on_change=SessionStateManager.reset_from_step,
+        args=(2,),
+        help="For locations without waterway map coverage, such as outside the US. "
+        "Skips dam validation (Step 3); you provide your own non-dam locations in Step 4.",
+    )
+    if no_waterway:
+        skip_waterway_steps()
+        st.info("No waterway map: Step 3 is skipped, and in Step 4 you upload your own non-dam locations.")
         return
 
     with safe_processing("Loading waterway data"):
@@ -354,6 +393,10 @@ def render_step3():
     """Step 3: Validate Dam Locations"""
     st.header("Step 3: Validate Dam Locations")
 
+    if SessionStateManager.get("no_waterway"):
+        st.info("Skipped: validation needs a waterway map, and none was selected in Step 2.")
+        return
+
     # Check prerequisites; allow user to proceed so long as the NHD dataset is loaded
     if not check_prerequisites([2]) and not SessionStateManager.get("dataset_loaded"):
         show_prerequisite_error("Step 3", [2])
@@ -466,6 +509,7 @@ def process_non_dam_upload(uploaded_file):
     SessionStateManager.set_multiple(
         {
             "Merged_collection": merged_collection,
+            "elevation_coverage": None,
             "Negative_upload_collection": negative_feature_collection,
             "Full_negative": negative_feature_collection,
             "buffer_complete": True,
@@ -582,7 +626,9 @@ def generate_negative_points(inner_radius, outer_radius, sampling_scale):
     positive_dam_id = ee.FeatureCollection(pos_indices.map(set_id_positives))
     merged_collection = positive_dam_id.merge(neg_points_id)
 
-    SessionStateManager.set_multiple({"Merged_collection": merged_collection, "buffer_complete": True})
+    SessionStateManager.set_multiple(
+        {"Merged_collection": merged_collection, "elevation_coverage": None, "buffer_complete": True}
+    )
     SessionStateManager.complete_step(4)
 
     return {
@@ -615,8 +661,13 @@ def render_step4():
     else:
         st.info("Using only valid dam locations for analysis")
 
-    upload_negatives_checkbox = st.checkbox("Upload Non-Dam Dataset (must be on a waterbody)")
-    generate_negatives_checkbox = st.checkbox("Generate Non-Dam Locations")
+    if SessionStateManager.get("no_waterway"):
+        # Generating non-dam locations samples the waterway map, so uploading is the only option.
+        st.caption("Upload Non-Dam Dataset (must be on a waterbody)")
+        upload_negatives_checkbox, generate_negatives_checkbox = True, False
+    else:
+        upload_negatives_checkbox = st.checkbox("Upload Non-Dam Dataset (must be on a waterbody)")
+        generate_negatives_checkbox = st.checkbox("Generate Non-Dam Locations")
 
     if upload_negatives_checkbox:
         uploaded_negatives = st.file_uploader(
@@ -730,6 +781,38 @@ def create_buffers(buffer_radius):
     return dam_data
 
 
+def check_elevation_coverage():
+    """Locations without 3DEP elevation, and the total count, checked once per set of points."""
+    coverage = SessionStateManager.get("elevation_coverage")
+    if coverage is None:
+        merged_collection = SessionStateManager.get("Merged_collection")
+        with safe_processing("Checking elevation data"):
+            coverage = ee.Dictionary(
+                {"missing": locations_without_elevation(merged_collection), "total": merged_collection.size()}
+            ).getInfo()
+        SessionStateManager.set("elevation_coverage", coverage)
+    return coverage
+
+
+def describe_missing_elevation(coverage, max_listed=10):
+    """Explain why the elevation filter is unavailable, or None if every location has elevation."""
+    missing, total = coverage["missing"], coverage["total"]
+    if not missing:
+        return None
+    if len(missing) == total:
+        return (
+            "There is no elevation data for these locations (the USGS 3DEP map covers the US only), "
+            "so the whole buffer is used."
+        )
+    listed = ", ".join(str(m) for m in missing[:max_listed])
+    if len(missing) > max_listed:
+        listed += f" and {len(missing) - max_listed} more"
+    return (
+        f"There is no elevation data for {len(missing)} of {total} locations ({listed}). "
+        "So that every location is processed the same way, the whole buffer is used for all of them."
+    )
+
+
 def render_step5():
     """Step 5: Create Buffers"""
     st.header("Step 5: Create Buffers")
@@ -749,17 +832,36 @@ def render_step5():
 
     # Display buffer settings
     st.subheader("Buffer Settings")
+    elevation_note = describe_missing_elevation(check_elevation_coverage())
+    if elevation_note:
+        # Filtering only the covered locations would process sites differently within one
+        # comparison, so every location uses the whole buffer instead.
+        SessionStateManager.set("use_whole_buffer", True)
+        st.info(elevation_note)
+    use_whole_buffer = st.checkbox(
+        "Don't filter by elevation (use the whole buffer)",
+        key="use_whole_buffer",
+        disabled=bool(elevation_note),
+        help="The elevation filter uses the USGS 3DEP elevation map, which covers the US only.",
+    )
     elevation_dist = st.number_input(
         "Elevation distance (meters)",
         value=AppConstants.DEFAULT_ELEVATION_DISTANCE,
         min_value=1,
         step=AppConstants.ELEVATION_STEP,
         key="elevation_distance_input",
+        disabled=use_whole_buffer,
     )
+    if use_whole_buffer:
+        radius_label = "Enter buffer radius (meters). We will analyze everything within this buffer."
+    else:
+        radius_label = (
+            "Enter buffer radius (meters). We will analyze locations within this buffer "
+            f"that are no more than the selected elevation distance ({elevation_dist}m) "
+            "away from the dam location."
+        )
     buffer_radius = st.number_input(
-        "Enter buffer radius (meters). We will analyze locations within this buffer "
-        f"that are no more than the selected elevation distance ({elevation_dist}m) "
-        "away from the dam location.",
+        radius_label,
         min_value=AppConstants.MIN_BUFFER_RADIUS,
         step=AppConstants.BUFFER_STEP,
         value=SessionStateManager.get("buffer_radius"),
@@ -857,6 +959,8 @@ def describe_month_gaps(df, months, label=None):
 def compute_metrics_df(dam_data, elevation_dist, checkpoint_key=None, months=None):
     """Run the batched metric pipeline over buffered points and return a DataFrame.
 
+    ``elevation_dist`` of None samples the whole buffer, with no elevation filter.
+
     Completed batches are checkpointed into session state under ``checkpoint_key``. A
     long run that is interrupted - a dropped connection, a browser refresh - can then be
     restarted and will reuse everything already computed instead of starting over.
@@ -897,6 +1001,7 @@ def compute_metrics_df(dam_data, elevation_dist, checkpoint_key=None, months=Non
         )
 
     failed_batches = []
+    sample_area_function = add_whole_buffer_band if elevation_dist is None else add_elevation_band
 
     for i in range(num_batches):
         if i in completed:
@@ -916,7 +1021,7 @@ def compute_metrics_df(dam_data, elevation_dist, checkpoint_key=None, months=Non
             try:
                 # Process batch through pipeline
                 s2_cloud_mask_batch = ee.ImageCollection(
-                    s2_export_for_visual(dam_batch_fc, add_elevation_band, elevation_dist, months)
+                    s2_export_for_visual(dam_batch_fc, sample_area_function, elevation_dist, months)
                 )
                 s2_image_collection_batch = ee.ImageCollection(s2_cloud_mask_batch)
                 s2_with_lst_batch = s2_image_collection_batch.map(add_landsat_lst_et)
@@ -1312,9 +1417,13 @@ def render_step6():
     """Step 6: Visualize Trends"""
     st.header("Step 6: Visualize Trends")
 
-    elevation_dist = SessionStateManager.get(
-        "elevation_distance_input", AppConstants.DEFAULT_ELEVATION_DISTANCE
-    )
+    # None means no elevation filter: compute_metrics_df then samples the whole buffer.
+    if SessionStateManager.get("use_whole_buffer"):
+        elevation_dist = None
+    else:
+        elevation_dist = SessionStateManager.get(
+            "elevation_distance_input", AppConstants.DEFAULT_ELEVATION_DISTANCE
+        )
 
     # Check prerequisites
     if not check_prerequisites([5]):

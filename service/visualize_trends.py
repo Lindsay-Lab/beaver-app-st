@@ -91,6 +91,43 @@ def get_monthly_median(collection, months=None):
     return monthly_images_collection
 
 
+def _clip_to_buffer(image):
+    """Carry the location's metadata onto a month image and clip it to the buffer."""
+    buffered_area = image.get("boxArea")
+    dam_id = image.get("damId")
+    # id_property is carried through as well: _extract_metadata reads it, and without it
+    # the metrics DataFrame loses the column and the CSV export has to fall back to
+    # matching coordinates by row order.
+    return (
+        image.set("Dam_id", dam_id)
+        .set("id_property", dam_id)
+        .set("Dam_status", image.get("DamStatus"))
+        .set("Area", buffered_area)
+        .clip(buffered_area)
+    )
+
+
+def add_whole_buffer_band(image, elev_dist=None):
+    """Sample the whole buffer: no elevation filter, so no elevation map is loaded.
+
+    For sites outside the US, where 3DEP has no data. elev_dist is ignored; it is only
+    accepted so this can stand in for add_elevation_band.
+    """
+    sample_mask = ee.Image(1).rename("sample_mask").clip(image.get("boxArea"))
+    return _clip_to_buffer(image).addBands(sample_mask)
+
+
+def locations_without_elevation(points):
+    """id_property of each location with no 3DEP elevation at the point itself.
+
+    add_elevation_band needs the elevation at the dam, and fails without it. 3DEP covers
+    the US only.
+    """
+    elevation = ee.ImageCollection("USGS/3DEP/10m_collection").mosaic().select("elevation")
+    sampled = elevation.reduceRegions(collection=points, reducer=ee.Reducer.first(), scale=10)
+    return sampled.filter(ee.Filter.notNull(["first"]).Not()).aggregate_array("id_property")
+
+
 def add_elevation_band(image, elev_dist):
 
     dataset = ee.ImageCollection("USGS/3DEP/10m_collection")
@@ -104,8 +141,6 @@ def add_elevation_band(image, elev_dist):
     # Extract sample area from elevation
     point_geom = image.get("DamGeo")
     buffered_area = image.get("boxArea")
-    dam_status = image.get("DamStatus")
-    dam_id = image.get("damId")
     # Extract elevation of dam location
     point_elevation = ee.Number(elevation.sample(point_geom, 10).first().get("elevation"))
 
@@ -119,22 +154,9 @@ def add_elevation_band(image, elev_dist):
         .where(elevation_clipped.gt(point_minus), 1)
         .where(elevation_clipped.gt(point_plus), 0)
     )
-    elevation_masked2 = elevation_masked.updateMask(elevation_masked.eq(1))
+    elevation_masked2 = elevation_masked.updateMask(elevation_masked.eq(1)).rename("sample_mask")
 
-    # Add bands, create new "id" property to name the file, and clip the images to the ROI.
-    # id_property is carried through as well: _extract_metadata reads it, and without it
-    # the metrics DataFrame loses the column and the CSV export has to fall back to
-    # matching coordinates by row order.
-    full_image = (
-        image.set("Dam_id", dam_id)
-        .set("id_property", dam_id)
-        .set("Dam_status", dam_status)
-        .set("Area", buffered_area)
-        .clip(buffered_area)
-    )
-    full_image2 = full_image.addBands(elevation_masked2)
-
-    return full_image2
+    return _clip_to_buffer(image).addBands(elevation_masked2)
 
 
 def s2_export_for_visual(dam_collection, elevation_function, elevation_dist=None, months=None) -> ee.ImageCollection:
@@ -298,9 +320,9 @@ def compute_all_metrics_lst_et(image) -> ee.Feature:
     Returns an ee.Feature containing mean NDVI, NDWI_Green, LST, and ET
     for the geometry of interest.
     """
-    # Get geometry from elevation band
-    elevation_mask = image.select("elevation")
-    geometry = elevation_mask.geometry()
+    # Get geometry from the sample mask (elevation band, or the whole buffer)
+    sample_mask = image.select("sample_mask")
+    geometry = sample_mask.geometry()
 
     # Compute indices
     ndvi, ndwi_green = _compute_indices(image)
@@ -308,8 +330,8 @@ def compute_all_metrics_lst_et(image) -> ee.Feature:
     # Prepare bands for reduction
     bands = {"NDVI": ndvi, "NDWI_Green": ndwi_green, "LST": image.select("LST"), "ET": image.select("ET")}
 
-    # Reduce all bands over geometry, restricted to the elevation band
-    reduced_values = _reduce_bands_by_mask(bands, mask=elevation_mask, geometry=geometry)
+    # Reduce all bands over geometry, restricted to the sample mask
+    reduced_values = _reduce_bands_by_mask(bands, mask=sample_mask, geometry=geometry)
 
     # Extract metadata and combine with metrics
     metadata = _extract_metadata(image)

@@ -23,6 +23,8 @@ from service.negative_sampling import (
 )
 from service.visualize_trends import (
     add_elevation_band,
+    add_whole_buffer_band,
+    locations_without_elevation,
     add_landsat_lst_et,
     compute_all_metrics_lst_et,
     s2_export_for_visual,
@@ -414,6 +416,62 @@ def test_compute_all_metrics_lst_et():
     assert 'ET' in props
     assert 'Image_month' in props
     assert 'Dam_status' in props
+
+
+def _july_metrics(point, sample_area_function):
+    dam_fc = ee.FeatureCollection([
+        ee.Feature(
+            point.buffer(150),
+            {"Dam": "positive", "Survey_Date": "2020-07-01", "id_property": "P1", "Point_geo": point},
+        )
+    ])
+    ic = s2_export_for_visual(dam_fc, sample_area_function, AppConstants.DEFAULT_ELEVATION_DISTANCE, months=[7])
+    return ic.map(add_landsat_lst_et).map(compute_all_metrics_lst_et).first()
+
+
+def test_whole_buffer_works_outside_elevation_map_coverage():
+    """Without the elevation filter, sites outside 3DEP (the US) still get metrics"""
+    scotland = ee.Geometry.Point([-4.5, 56.8])
+
+    metrics = _july_metrics(scotland, add_whole_buffer_band).toDictionary().getInfo()
+    assert -1 <= metrics["NDVI"] <= 1
+
+    # The elevation filter needs 3DEP's elevation at the dam, which doesn't exist here.
+    with pytest.raises(ee.EEException):
+        _july_metrics(scotland, add_elevation_band).toDictionary().getInfo()
+
+
+def test_locations_without_elevation_finds_sites_outside_3dep():
+    points = ee.FeatureCollection([
+        ee.Feature(ee.Geometry.Point([-123.0, 44.05]), {"id_property": "P1"}),  # Oregon
+        ee.Feature(ee.Geometry.Point([-164.8, 65.19]), {"id_property": "P2"}),  # Alaska
+        ee.Feature(ee.Geometry.Point([-4.5, 56.8]), {"id_property": "N1"}),  # Scotland
+    ])
+    assert locations_without_elevation(points).getInfo() == ["N1"]
+
+
+def test_whole_buffer_samples_the_entire_buffer():
+    """The sample mask covers every 10 m pixel of the buffer, not just the elevation band"""
+    point = ee.Geometry.Point([-122.1, 44.25])  # steep Cascades slope, so the band is narrower
+    dam_fc = ee.FeatureCollection([
+        ee.Feature(
+            point.buffer(150),
+            {"Dam": "positive", "Survey_Date": "2020-07-01", "id_property": "P1", "Point_geo": point},
+        )
+    ])
+
+    def mask_pixels(sample_area_function):
+        image = s2_export_for_visual(
+            dam_fc, sample_area_function, AppConstants.DEFAULT_ELEVATION_DISTANCE, months=[7]
+        ).first()
+        mask = image.select("sample_mask")
+        # Count in UTM so the pixels are 10 m squares, not 10 m-tall slivers of degrees.
+        return mask.reduceRegion(ee.Reducer.count(), mask.geometry(), 10, "EPSG:32610").get("sample_mask")
+
+    counts = ee.List([mask_pixels(add_whole_buffer_band), mask_pixels(add_elevation_band)]).getInfo()
+    whole, filtered = counts
+    assert whole == pytest.approx(math.pi * 150 ** 2 / 10 ** 2, rel=0.05)
+    assert filtered < whole
 
 
 def test_end_to_end_small_dataset(mock_streamlit):
