@@ -246,6 +246,18 @@ def skip_waterway_steps():
     SessionStateManager.complete_step(3)
 
 
+def switch_waterway_mode():
+    """Apply the "no waterway map" choice once, when it changes.
+
+    Switching modes invalidates any validation or non-dam points from the other mode. It
+    must not be reapplied on every rerun: that would reset Dam_data to the unbuffered dams
+    after Step 5 has buffered them.
+    """
+    SessionStateManager.reset_from_step(2)
+    if SessionStateManager.get("no_waterway"):
+        skip_waterway_steps()
+
+
 def render_step2():
     """Step 2: Select Waterway"""
     st.header("Step 2: Select Waterway")
@@ -258,14 +270,11 @@ def render_step2():
     no_waterway = st.checkbox(
         "Use no waterway map and upload non-dam locations",
         key="no_waterway",
-        # Switching modes invalidates any validation or non-dam points from the other mode.
-        on_change=SessionStateManager.reset_from_step,
-        args=(2,),
+        on_change=switch_waterway_mode,
         help="For locations without waterway map coverage, such as outside the US. "
         "Skips dam validation (Step 3); you provide your own non-dam locations in Step 4.",
     )
     if no_waterway:
-        skip_waterway_steps()
         st.info("No waterway map: Step 3 is skipped, and in Step 4 you upload your own non-dam locations.")
         return
 
