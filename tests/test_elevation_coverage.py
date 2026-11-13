@@ -1,4 +1,4 @@
-from pages.analyze_impacts import describe_missing_elevation
+from pages.analyze_impacts import describe_missing_elevation, describe_sample_area
 
 
 def test_no_note_when_every_location_has_elevation():
@@ -22,3 +22,18 @@ def test_long_lists_are_truncated():
     note = describe_missing_elevation({"missing": missing, "total": 20}, max_listed=10)
     assert "P10 and 3 more" in note
     assert "P11" not in note
+
+
+def test_sample_area_with_elevation_filter():
+    note = describe_sample_area(3, missing_elevation=False)
+    assert note == "Elevation filter: only land from 10 m below to 3 m above each location's elevation was analyzed."
+
+
+def test_sample_area_whole_buffer_chosen_by_user():
+    assert "selected in Step 5" in describe_sample_area(None, missing_elevation=False)
+
+
+def test_sample_area_whole_buffer_because_elevation_is_missing():
+    note = describe_sample_area(None, missing_elevation=True)
+    assert "elevation data isn't available for every location" in note
+    assert "selected in Step 5" not in note

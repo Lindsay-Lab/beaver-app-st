@@ -68,6 +68,7 @@ class AppConstants:
         "analysis_mode": None,
         "analysis_point_count": None,
         "analysis_label": None,
+        "analysis_sample_area": None,
         "df_lst": None,
         "fig": None,
         "plot_years": None,

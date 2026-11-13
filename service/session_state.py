@@ -145,6 +145,7 @@ class SessionStateManager:
             "analysis_mode",
             "analysis_point_count",
             "analysis_label",
+            "analysis_sample_area",
             "visualization_complete",
             "buffer_complete",
             "show_non_dam_section",

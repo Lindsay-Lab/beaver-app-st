@@ -1422,6 +1422,21 @@ def show_large_run_warning(n_points, n_years=1, n_months=12):
         return
 
 
+def describe_sample_area(elevation_dist, missing_elevation):
+    """Say which part of each buffer the analysis averaged over, and why."""
+    if elevation_dist is not None:
+        return (
+            f"Elevation filter: only land from {AppConstants.ELEVATION_DISTANCE_SUB} m below to "
+            f"{elevation_dist} m above each location's elevation was analyzed."
+        )
+    if missing_elevation:
+        return (
+            "Elevation filter: off. The whole buffer was analyzed because elevation data "
+            "isn't available for every location."
+        )
+    return "Elevation filter: off (selected in Step 5). The whole buffer was analyzed."
+
+
 def render_step6():
     """Step 6: Visualize Trends"""
     st.header("Step 6: Visualize Trends")
@@ -1433,6 +1448,10 @@ def render_step6():
         elevation_dist = SessionStateManager.get(
             "elevation_distance_input", AppConstants.DEFAULT_ELEVATION_DISTANCE
         )
+    # Worked out now, from the settings this run uses, and stored with its results, so it
+    # still describes them if Step 5 is changed afterwards.
+    coverage = SessionStateManager.get("elevation_coverage") or {}
+    sample_area_note = describe_sample_area(elevation_dist, missing_elevation=bool(coverage.get("missing")))
 
     # Check prerequisites
     if not check_prerequisites([5]):
@@ -1496,6 +1515,7 @@ def render_step6():
                     if result:
                         display_success_message("Multi-year analysis complete!")
                         has_results = True
+                        SessionStateManager.set("analysis_sample_area", sample_area_note)
 
     elif not has_results:
         show_large_run_warning(n_points)
@@ -1505,6 +1525,7 @@ def render_step6():
                 if result:
                     display_success_message("Visualization complete!")
                     has_results = True
+                    SessionStateManager.set("analysis_sample_area", sample_area_note)
 
     if has_results:
         fig = SessionStateManager.get("fig")
@@ -1516,6 +1537,10 @@ def render_step6():
             label = SessionStateManager.get("analysis_label")
             if label:
                 st.caption(f"Showing: {label}")
+
+            sample_area = SessionStateManager.get("analysis_sample_area")
+            if sample_area:
+                st.info(sample_area)
 
             # Shown every time the results are displayed, not just on the run that
             # produced them, so the caveat cannot be scrolled or rerun away.
